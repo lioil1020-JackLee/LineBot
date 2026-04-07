@@ -62,6 +62,15 @@ class Settings:
     lm_studio_temperature: float = float(os.getenv("LM_STUDIO_TEMPERATURE", "0.7"))
     sqlite_path: str = os.getenv("SQLITE_PATH", "data/app.db")
     session_max_turns: int = int(os.getenv("SESSION_MAX_TURNS", "8"))
+    session_memory_enabled: bool = _is_truthy(os.getenv("SESSION_MEMORY_ENABLED", "true"))
+    session_memory_trigger_messages: int = int(os.getenv("SESSION_MEMORY_TRIGGER_MESSAGES", "6"))
+    session_memory_window_messages: int = int(os.getenv("SESSION_MEMORY_WINDOW_MESSAGES", "12"))
+    session_memory_max_chars: int = int(os.getenv("SESSION_MEMORY_MAX_CHARS", "1200"))
+    coding_assistance_enabled: bool = _is_truthy(os.getenv("CODING_ASSISTANCE_ENABLED", "false"))
+    response_guard_enabled: bool = _is_truthy(os.getenv("RESPONSE_GUARD_ENABLED", "true"))
+    response_guard_rewrite_enabled: bool = _is_truthy(
+        os.getenv("RESPONSE_GUARD_REWRITE_ENABLED", "true")
+    )
     max_context_chars: int = int(os.getenv("MAX_CONTEXT_CHARS", "6000"))
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     rag_enabled: bool = _is_truthy(os.getenv("RAG_ENABLED", "false"))
@@ -96,8 +105,9 @@ class Settings:
     system_prompt: str = os.getenv(
         "SYSTEM_PROMPT",
         (
-            "你是 LINE 聊天助理，請使用繁體中文回答，"
-            "內容簡潔、清楚且可執行。若資訊不足，請誠實說明限制。"
+            "你是 LINE 萬事通助理，請使用繁體中文回答，"
+            "擅長日常知識、學習、工作、生活建議與資訊整理。"
+            "回覆需清楚、實用、結構化；若資訊不足，請誠實說明限制。"
         ),
     )
 

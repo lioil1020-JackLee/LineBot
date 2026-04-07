@@ -59,6 +59,26 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS session_memories (
+        session_id INTEGER PRIMARY KEY,
+        summary TEXT NOT NULL,
+        last_message_id INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(session_id) REFERENCES sessions(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS session_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        task_text TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(session_id) REFERENCES sessions(id)
+    )
+    """,
+    """
     CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)
     """,
     """
@@ -66,5 +86,11 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     """,
     """
     CREATE INDEX IF NOT EXISTS idx_knowledge_source ON knowledge_chunks(source_path)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_session_memories_updated_at ON session_memories(updated_at)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_session_tasks_session_id ON session_tasks(session_id)
     """,
 )

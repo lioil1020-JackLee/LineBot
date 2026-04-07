@@ -13,7 +13,9 @@ from .repositories import (
     LLMLogRepository,
     MessageRepository,
     PromptRepository,
+    SessionMemoryRepository,
     SessionRepository,
+    SessionTaskRepository,
 )
 from .services import (
     BotService,
@@ -22,8 +24,12 @@ from .services import (
     FactCheckService,
     HealthService,
     LLMService,
+    ProfileMemoryService,
     PromptService,
     RAGService,
+    ResponseGuardService,
+    SourceScoringService,
+    TaskMemoryService,
     SessionService,
 )
 
@@ -55,6 +61,8 @@ message_repository = MessageRepository(settings.sqlite_path)
 prompt_repository = PromptRepository(settings.sqlite_path)
 llm_log_repository = LLMLogRepository(settings.sqlite_path)
 knowledge_repository = KnowledgeRepository(settings.sqlite_path)
+session_memory_repository = SessionMemoryRepository(settings.sqlite_path)
+session_task_repository = SessionTaskRepository(settings.sqlite_path)
 llm_service = LLMService(
     base_url=settings.lm_studio_base_url,
     chat_model=settings.lm_studio_chat_model,
@@ -90,6 +98,14 @@ external_llm_service = (
     if settings.external_llm_fallback_enabled
     else None
 )
+response_guard_service = ResponseGuardService(
+    llm_service=llm_service,
+    enabled=settings.response_guard_enabled,
+    rewrite_enabled=settings.response_guard_rewrite_enabled,
+)
+source_scoring_service = SourceScoringService()
+profile_memory_service = ProfileMemoryService()
+task_memory_service = TaskMemoryService()
 bot_service = BotService(
     session_service=session_service,
     message_repository=message_repository,
@@ -100,6 +116,16 @@ bot_service = BotService(
     rag_enabled=settings.rag_enabled,
     rag_top_k=settings.rag_top_k,
     max_context_chars=settings.max_context_chars,
+    session_memory_repository=session_memory_repository,
+    session_memory_enabled=settings.session_memory_enabled,
+    session_memory_trigger_messages=settings.session_memory_trigger_messages,
+    session_memory_window_messages=settings.session_memory_window_messages,
+    session_memory_max_chars=settings.session_memory_max_chars,
+    coding_assistance_enabled=settings.coding_assistance_enabled,
+    response_guard_service=response_guard_service,
+    source_scoring_service=source_scoring_service,
+    session_task_repository=session_task_repository,
+    task_memory_service=task_memory_service,
     external_llm_service=external_llm_service,
     factcheck_service=(
         FactCheckService(
@@ -163,6 +189,60 @@ def admin_session(line_user_id: str) -> dict[str, object]:
     }
 
 
+@app.get("/admin/session/{line_user_id}/memory")
+def admin_session_memory(line_user_id: str) -> dict[str, object]:
+    session = session_repository.get_by_line_user_id(line_user_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    memory = session_memory_repository.get(session.id)
+    if memory is None:
+        return {
+            "ok": True,
+            "session_id": session.id,
+            "summary": "",
+            "last_message_id": 0,
+        }
+
+    return {
+        "ok": True,
+        "session_id": memory.session_id,
+        "summary": memory.summary,
+        "last_message_id": memory.last_message_id,
+    }
+
+
+@app.get("/admin/session/{line_user_id}/profile")
+def admin_session_profile(line_user_id: str) -> dict[str, object]:
+    session = session_repository.get_by_line_user_id(line_user_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    memory = session_memory_repository.get(session.id)
+    summary = memory.summary if memory is not None else ""
+    profile = profile_memory_service.extract(summary)
+    return {
+        "ok": True,
+        "session_id": session.id,
+        "profile": profile,
+    }
+
+
+@app.get("/admin/session/{line_user_id}/tasks")
+def admin_session_tasks(line_user_id: str, status: str = "open") -> dict[str, object]:
+    session = session_repository.get_by_line_user_id(line_user_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    tasks = session_task_repository.get_by_session(session_id=session.id, status=status or None)
+    return {
+        "ok": True,
+        "session_id": session.id,
+        "count": len(tasks),
+        "items": [asdict(item) for item in tasks],
+    }
+
+
 @app.post("/admin/knowledge/reindex")
 def admin_knowledge_reindex() -> dict[str, object]:
     result = rags_service.reindex_knowledge()
@@ -187,6 +267,15 @@ def admin_llm_logs(limit: int = 20) -> dict[str, object]:
         "ok": True,
         "count": len(logs),
         "items": logs,
+    }
+
+
+@app.get("/admin/metrics")
+def admin_metrics(limit: int = 200) -> dict[str, object]:
+    safe_limit = min(max(limit, 10), 1000)
+    return {
+        "ok": True,
+        **health_service.metrics(limit=safe_limit),
     }
 
 

@@ -69,6 +69,12 @@ uv run python scripts/cleanup_runtime.py --llm-log-days 7
 
 # 產生健康報告
 uv run python scripts/health_report.py
+
+# 執行離線品質評估
+uv run python scripts/run_eval.py
+
+# 匯出 metrics 週報 JSON
+uv run python scripts/export_metrics_report.py
 ```
 
 ## 主要環境變數
@@ -104,6 +110,17 @@ uv run python scripts/health_report.py
 - `AGENT_ENABLED`
 - `EXTERNAL_LLM_FALLBACK_ENABLED`
 
+### Session 記憶
+
+- `SESSION_MAX_TURNS`
+- `SESSION_MEMORY_ENABLED`
+- `SESSION_MEMORY_TRIGGER_MESSAGES`
+- `SESSION_MEMORY_WINDOW_MESSAGES`
+- `SESSION_MEMORY_MAX_CHARS`
+- `CODING_ASSISTANCE_ENABLED`（設 `false` 時不提供程式碼讀寫/除錯）
+- `RESPONSE_GUARD_ENABLED`（回答品質守門）
+- `RESPONSE_GUARD_REWRITE_ENABLED`（守門未通過時自動重寫）
+
 ## API 端點
 
 ### 基礎
@@ -117,11 +134,23 @@ uv run python scripts/health_report.py
 
 - `POST /admin/reload-prompt`
 - `GET /admin/session/{line_user_id}`
+- `GET /admin/session/{line_user_id}/memory`
+- `GET /admin/session/{line_user_id}/profile`
+- `GET /admin/session/{line_user_id}/tasks`
 - `GET /admin/llm-logs`
+- `GET /admin/metrics`
 - `GET /admin/model`
 - `POST /admin/model`
 - `POST /admin/knowledge/reindex`
 - `GET /admin/knowledge/status`
+
+## 任務指令
+
+在 LINE 對話中可直接使用：
+
+- `查看待辦`
+- `完成第1項`
+- `開始第2項`
 
 ## 專案結構
 

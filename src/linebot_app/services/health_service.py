@@ -40,3 +40,37 @@ class HealthService:
             "lm_studio": {"ok": lm_ok, "base_url": self.llm_service.base_url},
             "recent_llm_logs": recent_logs,
         }
+
+    def metrics(self, *, limit: int = 200) -> dict[str, object]:
+        logs = self.llm_log_repository.get_recent(limit=limit)
+        status_counts: dict[str, int] = {}
+        latency_values: list[int] = []
+        token_values: list[int] = []
+
+        for item in logs:
+            status_counts[item.status] = status_counts.get(item.status, 0) + 1
+            if item.latency_ms is not None:
+                latency_values.append(item.latency_ms)
+            if item.total_tokens is not None:
+                token_values.append(item.total_tokens)
+
+        latency_avg = (
+            round(sum(latency_values) / len(latency_values), 2)
+            if latency_values
+            else None
+        )
+        token_avg = round(sum(token_values) / len(token_values), 2) if token_values else None
+
+        return {
+            "window": {"log_count": len(logs), "limit": limit},
+            "status_counts": status_counts,
+            "latency_ms": {
+                "avg": latency_avg,
+                "max": max(latency_values) if latency_values else None,
+                "min": min(latency_values) if latency_values else None,
+            },
+            "token_usage": {
+                "avg_total_tokens": token_avg,
+                "max_total_tokens": max(token_values) if token_values else None,
+            },
+        }

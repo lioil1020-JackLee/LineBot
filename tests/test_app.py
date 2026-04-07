@@ -57,6 +57,30 @@ def test_admin_session_not_found() -> None:
     assert response.status_code == 404
 
 
+def test_admin_session_profile_not_found() -> None:
+    with TestClient(app) as client:
+        response = client.get("/admin/session/not-exists/profile")
+
+    assert response.status_code == 404
+
+
+def test_admin_session_tasks_not_found() -> None:
+    with TestClient(app) as client:
+        response = client.get("/admin/session/not-exists/tasks")
+
+    assert response.status_code == 404
+
+
+def test_admin_metrics_endpoint_shape() -> None:
+    with TestClient(app) as client:
+        response = client.get("/admin/metrics")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert "window" in payload
+
+
 def test_admin_knowledge_status_endpoint() -> None:
     with TestClient(app) as client:
         response = client.get("/admin/knowledge/status")
@@ -73,6 +97,17 @@ def test_admin_llm_logs_endpoint() -> None:
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert "items" in response.json()
+
+
+def test_admin_metrics_endpoint() -> None:
+    with TestClient(app) as client:
+        response = client.get("/admin/metrics")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert "status_counts" in payload
+    assert "latency_ms" in payload
 
 
 def test_admin_model_endpoints() -> None:
