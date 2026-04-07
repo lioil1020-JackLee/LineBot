@@ -1,0 +1,36 @@
+[project]
+name = "linebot-app"
+version = "0.1.0"
+description = "LINE Bot project"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "duckduckgo-search>=8.1.1",
+    "fastapi>=0.135.3",
+    "httpx>=0.28.1",
+    "line-bot-sdk>=3.22.0",
+    "python-dotenv>=1.2.2",
+    "uvicorn[standard]>=0.44.0",
+]
+
+[project.scripts]
+linebot = "linebot_app:main"
+
+[build-system]
+requires = ["uv_build>=0.11.2,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.15.9",
+    "pyinstaller>=6.0.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

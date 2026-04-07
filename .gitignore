@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Runtime data
+data/*.db
+data/
+
+# Secrets (never commit real credentials)
+.env
+
+# Local tunnel secrets
+.ngrok/
+
+# PyInstaller build outputs
+build/
+dist/
+*.spec.bak
+*.egg-info/
+.pyinstaller/

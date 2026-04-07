@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from functools import lru_cache
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+@dataclass(frozen=True)
+class Settings:
+    line_channel_access_token: str = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+    line_channel_secret: str = os.getenv("LINE_CHANNEL_SECRET", "")
+    line_bot_name: str = os.getenv("LINE_BOT_NAME", "")
+    app_host: str = os.getenv("APP_HOST", "0.0.0.0")
+    app_port: int = int(os.getenv("APP_PORT", "8000"))
+    app_reload: bool = os.getenv("APP_RELOAD", "true").lower() in {"1", "true", "yes", "on"}
+    lm_studio_base_url: str = os.getenv("LM_STUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
+    lm_studio_exe_path: str = os.getenv("LM_STUDIO_EXE_PATH", "")
+    lm_studio_chat_model: str = os.getenv("LM_STUDIO_CHAT_MODEL", "qwen/qwen2.5-7b-instruct")
+    lm_studio_embed_model: str = os.getenv(
+        "LM_STUDIO_EMBED_MODEL",
+        "text-embedding-nomic-embed-text-v1.5",
+    )
+    lm_studio_timeout_seconds: int = int(os.getenv("LM_STUDIO_TIMEOUT_SECONDS", "90"))
+    lm_studio_max_tokens: int = int(os.getenv("LM_STUDIO_MAX_TOKENS", "1024"))
+    lm_studio_temperature: float = float(os.getenv("LM_STUDIO_TEMPERATURE", "0.7"))
+    sqlite_path: str = os.getenv("SQLITE_PATH", "data/app.db")
+    session_max_turns: int = int(os.getenv("SESSION_MAX_TURNS", "8"))
+    max_context_chars: int = int(os.getenv("MAX_CONTEXT_CHARS", "6000"))
+    log_level: str = os.getenv("LOG_LEVEL", "INFO")
+    rag_enabled: bool = os.getenv("RAG_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+    knowledge_dir: str = os.getenv("KNOWLEDGE_DIR", "data/knowledge")
+    agent_enabled: bool = os.getenv("AGENT_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    rag_top_k: int = int(os.getenv("RAG_TOP_K", "3"))
+    rag_chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "500"))
+    rag_chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "100"))
+    system_prompt: str = os.getenv(
+        "SYSTEM_PROMPT",
+        (
+            "你是 LINE 聊天助理，請使用繁體中文回答，"
+            "內容簡潔、清楚且可執行。若資訊不足，請誠實說明限制。"
+        ),
+    )
+
+    @property
+    def line_ready(self) -> bool:
+        return bool(self.line_channel_access_token and self.line_channel_secret)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
