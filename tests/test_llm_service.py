@@ -29,6 +29,7 @@ class _FakeClient:
     ) -> None:
         self.response_map = response_map
         self.raise_timeout = raise_timeout
+        self._post_counts: dict[tuple[str, str], int] = {}
 
     def __enter__(self):
         return self
@@ -42,7 +43,13 @@ class _FakeClient:
     def post(self, url: str, json: dict[str, object]):
         if self.raise_timeout:
             raise httpx.TimeoutException("timeout")
-        return self.response_map[("POST", url)]
+        key = ("POST", url)
+        response = self.response_map[key]
+        if isinstance(response, list):
+            idx = self._post_counts.get(key, 0)
+            self._post_counts[key] = idx + 1
+            return response[min(idx, len(response) - 1)]
+        return response
 
 
 def test_generate_reply_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -118,6 +125,82 @@ def test_generate_reply_no_choices(monkeypatch: pytest.MonkeyPatch) -> None:
                 "POST",
                 "http://127.0.0.1:1234/v1/chat/completions",
             ): _FakeResponse(200, {"choices": []})
+        }
+    )
+    monkeypatch.setattr(httpx, "Client", lambda timeout: fake)
+
+    with pytest.raises(LLMServiceError):
+        service.generate_reply(
+            system_prompt="test",
+            conversation=[{"role": "user", "content": "hi"}],
+        )
+
+
+def test_generate_reply_empty_content_retry_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = LLMService(
+        base_url="http://127.0.0.1:1234/v1",
+        chat_model="chat-model",
+        embed_model="embed-model",
+        timeout_seconds=10,
+        max_tokens=256,
+        temperature=0.2,
+    )
+    fake = _FakeClient(
+        response_map={
+            (
+                "POST",
+                "http://127.0.0.1:1234/v1/chat/completions",
+            ): [
+                _FakeResponse(
+                    200,
+                    {
+                        "model": "chat-model",
+                        "choices": [{"message": {"content": ""}}],
+                        "usage": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 5,
+                            "total_tokens": 15,
+                        },
+                    },
+                ),
+                _FakeResponse(
+                    200,
+                    {
+                        "model": "chat-model",
+                        "choices": [{"message": {"content": "補救成功"}}],
+                    },
+                ),
+            ]
+        }
+    )
+    monkeypatch.setattr(httpx, "Client", lambda timeout: fake)
+
+    result = service.generate_reply(
+        system_prompt="test",
+        conversation=[{"role": "user", "content": "hi"}],
+    )
+
+    assert result.text == "補救成功"
+
+
+def test_generate_reply_empty_content_retry_still_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = LLMService(
+        base_url="http://127.0.0.1:1234/v1",
+        chat_model="chat-model",
+        embed_model="embed-model",
+        timeout_seconds=10,
+        max_tokens=256,
+        temperature=0.2,
+    )
+    fake = _FakeClient(
+        response_map={
+            (
+                "POST",
+                "http://127.0.0.1:1234/v1/chat/completions",
+            ): [
+                _FakeResponse(200, {"choices": [{"message": {"content": ""}}]}),
+                _FakeResponse(200, {"choices": [{"message": {"content": ""}}]}),
+            ]
         }
     )
     monkeypatch.setattr(httpx, "Client", lambda timeout: fake)

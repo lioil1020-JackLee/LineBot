@@ -47,6 +47,7 @@ class Settings:
     line_group_require_mention: bool = _is_truthy(os.getenv("LINE_GROUP_REQUIRE_MENTION", "true"))
     app_host: str = os.getenv("APP_HOST", "0.0.0.0")
     app_port: int = int(os.getenv("APP_PORT", "8000"))
+    tray_ui_enabled: bool = _is_truthy(os.getenv("TRAY_UI_ENABLED", "false"))
     # Frozen executable must disable reload to avoid watchdog respawn loops.
     app_reload: bool = (
         False if getattr(sys, "frozen", False) else _is_truthy(os.getenv("APP_RELOAD", "true"))
@@ -72,6 +73,8 @@ class Settings:
     response_guard_rewrite_enabled: bool = _is_truthy(
         os.getenv("RESPONSE_GUARD_REWRITE_ENABLED", "true")
     )
+    roleplay_enabled: bool = _is_truthy(os.getenv("ROLEPLAY_ENABLED", "false"))
+    roleplay_persona_prompt: str = os.getenv("ROLEPLAY_PERSONA_PROMPT", "")
     max_context_chars: int = int(os.getenv("MAX_CONTEXT_CHARS", "6000"))
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     rag_enabled: bool = _is_truthy(os.getenv("RAG_ENABLED", "false"))

@@ -79,6 +79,17 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS persona_presets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        prompt TEXT NOT NULL,
+        is_builtin INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
     CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)
     """,
     """
@@ -92,5 +103,8 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     """,
     """
     CREATE INDEX IF NOT EXISTS idx_session_tasks_session_id ON session_tasks(session_id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_persona_presets_active ON persona_presets(is_active)
     """,
 )

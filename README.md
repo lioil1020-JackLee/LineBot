@@ -39,6 +39,10 @@ Copy-Item .env.example .env
 ### 3. 啟動
 
 ```powershell
+# Windows（UI-only，無終端機視窗）
+./scripts/run_dev.ps1
+
+# 其他平台或除錯用途
 uv run linebot
 ```
 
@@ -93,6 +97,7 @@ uv run python scripts/export_metrics_report.py
 - `APP_HOST`（預設 `0.0.0.0`）
 - `APP_PORT`（預設 `8000`）
 - `APP_RELOAD`（開發時可設 `true`）
+- `TRAY_UI_ENABLED`（Windows 開發模式顯示托盤 UI，可直接下拉切換角色）
 
 ### LM Studio
 
@@ -121,6 +126,8 @@ uv run python scripts/export_metrics_report.py
 - `CODING_ASSISTANCE_ENABLED`（設 `false` 時不提供程式碼讀寫/除錯）
 - `RESPONSE_GUARD_ENABLED`（回答品質守門）
 - `RESPONSE_GUARD_REWRITE_ENABLED`（守門未通過時自動重寫）
+- `ROLEPLAY_ENABLED`（是否啟用角色扮演人設）
+- `ROLEPLAY_PERSONA_PROMPT`（自訂角色描述）
 
 ## API 端點
 
@@ -142,8 +149,28 @@ uv run python scripts/export_metrics_report.py
 - `GET /admin/metrics`
 - `GET /admin/model`
 - `POST /admin/model`
+- `GET /admin/persona`
+- `POST /admin/persona`
 - `POST /admin/knowledge/reindex`
 - `GET /admin/knowledge/status`
+
+### 角色模式設定
+
+可透過 API 即時切換角色，不需重啟服務：
+
+```powershell
+# 1) 切換為虛擬情人
+Invoke-RestMethod http://127.0.0.1:8000/admin/persona -Method Post -ContentType 'application/json' -Body '{"preset":"virtual_partner"}'
+
+# 2) 切換為好友
+Invoke-RestMethod http://127.0.0.1:8000/admin/persona -Method Post -ContentType 'application/json' -Body '{"preset":"close_friend"}'
+
+# 3) 自訂角色
+Invoke-RestMethod http://127.0.0.1:8000/admin/persona -Method Post -ContentType 'application/json' -Body '{"custom_prompt":"你現在扮演健身教練，回覆精簡、直接。"}'
+
+# 4) 清除角色（回到預設）
+Invoke-RestMethod http://127.0.0.1:8000/admin/persona -Method Post -ContentType 'application/json' -Body '{}'
+```
 
 ## 任務指令
 

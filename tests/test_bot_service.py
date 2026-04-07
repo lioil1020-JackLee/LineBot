@@ -22,8 +22,10 @@ class _FakeLLMService:
 
     def __init__(self, *, raises: Exception | None = None) -> None:
         self.raises = raises
+        self.last_system_prompt = ""
 
     def generate_reply(self, *, system_prompt: str, conversation: list[dict[str, str]]) -> LLMReply:
+        self.last_system_prompt = system_prompt
         if self.raises:
             raise self.raises
         if "你是對話摘要器" in system_prompt:
@@ -345,6 +347,42 @@ def test_bot_service_handles_llm_error(tmp_path) -> None:
     assert "暫時無法" in reply
     logs = llm_log_repo.get_recent(limit=1)
     assert logs[0].status == "error"
+
+
+def test_bot_service_applies_persona_prompt(tmp_path) -> None:
+    db_path = str(tmp_path / "app.db")
+    init_db(db_path)
+
+    session_repo = SessionRepository(db_path)
+    message_repo = MessageRepository(db_path)
+    prompt_repo = PromptRepository(db_path)
+    llm_log_repo = LLMLogRepository(db_path)
+    fake_llm = _FakeLLMService()
+
+    session_service = SessionService(
+        session_repository=session_repo,
+        message_repository=message_repo,
+        max_turns=8,
+    )
+    prompt_service = PromptService(prompt_repository=prompt_repo, default_prompt="請使用繁體中文")
+    service = BotService(
+        session_service=session_service,
+        message_repository=message_repo,
+        llm_log_repository=llm_log_repo,
+        llm_service=fake_llm,
+        prompt_service=prompt_service,
+        rag_service=None,
+        rag_enabled=False,
+        rag_top_k=3,
+        max_context_chars=6000,
+        persona_prompt="你現在是溫柔的虛擬情人。",
+    )
+    service.agent_enabled = False
+
+    service.handle_user_message(line_user_id="u-persona", text="今天心情不好")
+
+    assert "[角色設定]" in fake_llm.last_system_prompt
+    assert "溫柔的虛擬情人" in fake_llm.last_system_prompt
 
 
 def test_bot_service_adds_rag_citations(tmp_path) -> None:

@@ -16,7 +16,9 @@ except ImportError:
 
 
 def main() -> None:
-    if sys.platform == "win32" and getattr(sys, "frozen", False):
+    settings = get_settings()
+    should_run_tray = sys.platform == "win32"
+    if should_run_tray:
         try:
             from .tray_app import run_tray_app
 
@@ -26,7 +28,6 @@ def main() -> None:
             # Fallback to normal uvicorn run if tray mode fails unexpectedly.
             pass
 
-    settings = get_settings()
     uvicorn_kwargs: dict[str, object] = {
         "host": settings.app_host,
         "port": settings.app_port,

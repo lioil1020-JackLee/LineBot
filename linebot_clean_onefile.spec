@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 import sys
 from pathlib import Path
 
-ONE_FILE = False  # False = onedir, True = onefile
+ONE_FILE = True  # False = onedir, True = onefile
 
 PROJECT_NAME = 'linebot-app'
 PROJECT_ROOT = Path('.').resolve()
@@ -65,7 +65,7 @@ if ONE_FILE:
         upx=True,
         upx_exclude=[],
         runtime_tmpdir=None,
-        console=True,
+        console=False,
         disable_windowed_traceback=False,
         argv_emulation=False,
         target_arch=None,
@@ -86,7 +86,7 @@ else:
         upx=True,
         upx_exclude=[],
         runtime_tmpdir=None,
-        console=True,
+        console=False,
         disable_windowed_traceback=False,
         argv_emulation=False,
         target_arch=None,

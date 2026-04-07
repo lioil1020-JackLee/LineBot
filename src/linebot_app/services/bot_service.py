@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import re
+from pathlib import Path
 from uuid import uuid4
 
 from linebot_app.repositories.llm_log_repository import LLMLogRepository
@@ -10,15 +10,15 @@ from linebot_app.repositories.message_repository import MessageRepository
 from linebot_app.repositories.session_memory_repository import SessionMemoryRepository
 from linebot_app.repositories.session_task_repository import SessionTaskRepository
 
-from .factcheck_service import FactCheckService
 from .external_llm_service import ExternalLLMService
+from .factcheck_service import FactCheckService
 from .llm_service import LLMService, LLMServiceError, LMStudioTimeoutError, LMStudioUnavailableError
 from .prompt_service import PromptService
 from .rag_service import RAGService
 from .response_guard_service import ResponseGuardService
+from .session_service import SessionService
 from .source_scoring_service import SourceScoringService
 from .task_memory_service import TaskMemoryService
-from .session_service import SessionService
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,8 @@ _MEMORY_SUMMARY_PROMPT = (
     "只輸出摘要內容，不要多餘前言。"
 )
 
+_PERSONA_PROMPT_HEADER = "\n\n[角色設定]\n"
+
 # agent_loop 在 linebot_app package 層級
 try:
     from ..agent_loop import run_agent_loop
@@ -101,6 +103,7 @@ class BotService:
         task_memory_service: TaskMemoryService | None = None,
         factcheck_service: FactCheckService | None = None,
         external_llm_service: ExternalLLMService | None = None,
+        persona_prompt: str = "",
     ) -> None:
         self.session_service = session_service
         self.message_repository = message_repository
@@ -124,6 +127,11 @@ class BotService:
         self.factcheck_service = factcheck_service
         self.external_llm_service = external_llm_service
         self.agent_enabled: bool = True
+        self.persona_prompt = persona_prompt.strip()
+
+    def set_persona_prompt(self, prompt: str) -> str:
+        self.persona_prompt = prompt.strip()
+        return self.persona_prompt
 
     def _looks_like_coding_request(self, text: str) -> bool:
         normalized = re.sub(r"\s+", "", text.lower())
@@ -207,7 +215,10 @@ class BotService:
             return None
 
         action, idx = parsed
-        open_tasks = self.session_task_repository.get_by_session(session_id=session_id, status="open")
+        open_tasks = self.session_task_repository.get_by_session(
+            session_id=session_id,
+            status="open",
+        )
 
         if action == "list":
             if not open_tasks:
@@ -284,6 +295,8 @@ class BotService:
         conversation.append({"role": "user", "content": incoming_text})
         conversation = self._truncate_conversation(conversation)
         system_prompt = self.prompt_service.get_active_prompt() + _RUNTIME_CAPABILITY_PROMPT
+        if self.persona_prompt:
+            system_prompt += _PERSONA_PROMPT_HEADER + self.persona_prompt
         source_markers: list[str] = []
 
         if self.session_memory_enabled and self.session_memory_repository is not None:
@@ -295,7 +308,10 @@ class BotService:
                 )
 
         if self.session_task_repository is not None:
-            open_tasks = self.session_task_repository.get_by_session(session_id=session.id, status="open")
+            open_tasks = self.session_task_repository.get_by_session(
+                session_id=session.id,
+                status="open",
+            )
             if open_tasks:
                 task_block = "\n".join(f"- {item.task_text}" for item in open_tasks[:10])
                 system_prompt += f"\n\n[使用者待辦事項]\n{task_block}"
@@ -306,7 +322,9 @@ class BotService:
                 reference_block = "\n\n".join(
                     (
                         f"- [{Path(item.source_path).name}#{item.chunk_index}]"
-                        f"(信心:{self.source_scoring_service.confidence_label(item.score)}) {item.content}"
+                        "(信心:"
+                        f"{self.source_scoring_service.confidence_label(item.score)}) "
+                        f"{item.content}"
                     )
                     for item in references
                 )

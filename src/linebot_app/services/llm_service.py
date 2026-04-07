@@ -107,7 +107,11 @@ class LLMService:
                 [str(exe_path)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0,
+                creationflags=(
+                    subprocess.CREATE_NEW_CONSOLE
+                    if hasattr(subprocess, "CREATE_NEW_CONSOLE")
+                    else 0
+                ),
             )
         except Exception as e:
             print(f"❌ 啟動 LM Studio 失敗: {e}")
@@ -157,7 +161,11 @@ class LLMService:
         message = choices[0].get("message", {})
         text = (message.get("content") or "").strip()
         if not text:
-            raise LLMServiceError("LM Studio returned empty content")
+            retry_text = self._retry_finalize_answer(conversation=conversation)
+            if retry_text:
+                text = retry_text
+            else:
+                raise LLMServiceError("LM Studio returned empty content")
 
         usage = data.get("usage", {})
         return LLMReply(
@@ -168,6 +176,46 @@ class LLMService:
             completion_tokens=usage.get("completion_tokens"),
             total_tokens=usage.get("total_tokens"),
         )
+
+    def _retry_finalize_answer(self, *, conversation: list[dict[str, str]]) -> str | None:
+        """Handle occasional empty content responses by forcing a concise final answer once."""
+        recovery_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是助理。請直接輸出最終回答，不要輸出思考過程、分析步驟、"
+                    "tool_call 或其他中介內容。"
+                ),
+            },
+            *conversation,
+        ]
+        payload = {
+            "model": self.chat_model,
+            "messages": recovery_messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+        }
+        try:
+            with httpx.Client(timeout=self.timeout_seconds) as client:
+                response = client.post(f"{self.base_url}/chat/completions", json=payload)
+        except httpx.HTTPError:
+            return None
+
+        if response.status_code >= 400:
+            return None
+
+        try:
+            data = response.json()
+        except ValueError:
+            return None
+
+        choices = data.get("choices", [])
+        if not choices:
+            return None
+
+        message = choices[0].get("message", {})
+        text = (message.get("content") or "").strip()
+        return text or None
 
     def embed_text(self, text: str) -> list[float]:
         payload = {
