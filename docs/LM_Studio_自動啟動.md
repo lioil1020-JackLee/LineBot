@@ -76,8 +76,8 @@ Test-Path "C:\Users\lioil\AppData\Local\LM-Studio\bin\LM-Studio.exe"
 ### 場景 1：首次執行（LM Studio 未啟動）
 
 ```powershell
-# 執行 Line Bot
-& "E:\py\LineBot\dist\linebot-app-onefile.exe"
+# 執行 Line Bot（onefile）
+& "E:\py\LineBot\dist\linebot-app.exe"
 
 # 輸出：
 # 🚀 啟動 LM Studio: C:\Users\lioil\AppData\Local\LM-Studio\bin\LM-Studio.exe
@@ -88,8 +88,8 @@ Test-Path "C:\Users\lioil\AppData\Local\LM-Studio\bin\LM-Studio.exe"
 ### 場景 2：LM Studio 已在運行
 
 ```powershell
-# 執行 Line Bot
-& "E:\py\LineBot\dist\linebot-app-onefile.exe"
+# 執行 Line Bot（onefile）
+& "E:\py\LineBot\dist\linebot-app.exe"
 
 # 輸出：
 # ✓ LM Studio 已在執行
@@ -178,7 +178,7 @@ result = llm_service.try_start_lm_studio(max_wait_seconds=30)
 # 返回 False: 連接失敗且無法啟動
 ```
 
-## 集成到包裝的 .exe
+## 套用到打包後的 .exe
 
 如果使用 PyInstaller 打包的 exe，自動啟動功能也會正常工作：
 
@@ -186,8 +186,8 @@ result = llm_service.try_start_lm_studio(max_wait_seconds=30)
 # onedir 版本
 E:\py\LineBot\dist\linebot-app\linebot-app.exe
 
-# onefile 版本  
-E:\py\LineBot\dist\linebot-app-onefile.exe
+# onefile 版本
+E:\py\LineBot\dist\linebot-app.exe
 ```
 
 兩個版本都包含相同的自動啟動邏輯。
@@ -200,7 +200,7 @@ E:\py\LineBot\dist\linebot-app-onefile.exe
 # 執行測試套件
 pytest tests/ -v
 
-# 所有 20 個測試應該通過
+# 目前測試數量會隨專案調整，請以當下 pytest 輸出為準
 # tests/test_llm_service.py 中有相關測試
 ```
 

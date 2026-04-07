@@ -14,7 +14,8 @@ $ErrorActionPreference = "Stop"
 # ============================================================================
 # 路徑與設定
 # ============================================================================
-$ProjectRoot = Split-Path -Parent $MyInvocation.MyCommandPath
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommandPath
+$ProjectRoot = Split-Path -Parent $ScriptDir
 $SpecFile = Join-Path $ProjectRoot "linebot_clean_onefile.spec"
 $DistDir = Join-Path $ProjectRoot "dist"
 $BuildDir = Join-Path $ProjectRoot "build"
@@ -51,7 +52,7 @@ Write-Host "[*] 檢查環境..." -ForegroundColor Yellow
 
 # 檢查 spec 檔案
 if (-not (Test-Path $SpecFile)) {
-    Write-Host "[✗] linebot.spec 不存在！" -ForegroundColor Red
+    Write-Host "[✗] linebot_clean_onefile.spec 不存在！" -ForegroundColor Red
     exit 1
 }
 Write-Host "[✓] spec 檔案存在" -ForegroundColor Green

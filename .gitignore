@@ -9,6 +9,13 @@ wheels/
 # Virtual environments
 .venv
 
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# IDE metadata
+.vscode/
+
 # Runtime data
 data/*.db
 data/
