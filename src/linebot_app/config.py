@@ -44,6 +44,7 @@ class Settings:
     line_channel_access_token: str = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
     line_channel_secret: str = os.getenv("LINE_CHANNEL_SECRET", "")
     line_bot_name: str = os.getenv("LINE_BOT_NAME", "")
+    line_group_require_mention: bool = _is_truthy(os.getenv("LINE_GROUP_REQUIRE_MENTION", "true"))
     app_host: str = os.getenv("APP_HOST", "0.0.0.0")
     app_port: int = int(os.getenv("APP_PORT", "8000"))
     # Frozen executable must disable reload to avoid watchdog respawn loops.

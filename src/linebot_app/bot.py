@@ -106,6 +106,9 @@ def _should_reply(event: MessageEvent) -> bool:
     if not _is_group_or_room_event(event):
         return True
 
+    if not getattr(settings, "line_group_require_mention", True):
+        return True
+
     # 圖片/檔案訊息通常沒有 @mention，群組內預設仍允許回應。
     if isinstance(getattr(event, "message", None), (ImageMessageContent, FileMessageContent)):
         return True

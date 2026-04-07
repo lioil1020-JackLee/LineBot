@@ -86,6 +86,7 @@ uv run python scripts/export_metrics_report.py
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `LINE_CHANNEL_SECRET`
 - `LINE_BOT_NAME`（群組中只回應提及名稱的訊息）
+- `LINE_GROUP_REQUIRE_MENTION`（`true` 需 `@lioil_bot` 才回；`false` 不用 @ 也回）
 
 ### 應用
 

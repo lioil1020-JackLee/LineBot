@@ -68,6 +68,39 @@ def test_group_message_without_self_mention_skips_reply(monkeypatch: pytest.Monk
     assert called["reply"] is False
 
 
+def test_group_message_without_mention_replies_when_switch_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event = SimpleNamespace(
+        reply_token="reply-token",
+        source=SimpleNamespace(type="group", user_id="u-group"),
+        message=SimpleNamespace(text="大家好", mention=None),
+    )
+
+    monkeypatch.setattr("linebot_app.bot.parser.parse", lambda _body, _sig: [event])
+    monkeypatch.setattr("linebot_app.bot._iter_text_events", lambda _events: [event])
+    monkeypatch.setattr(
+        "linebot_app.bot.settings",
+        SimpleNamespace(line_bot_name="lioil_bot", line_group_require_mention=False),
+    )
+
+    called = {"reply": False, "service": False}
+
+    def _fake_reply_text(_reply_token: str, _text: str) -> None:
+        called["reply"] = True
+
+    class _Service:
+        def handle_user_message(self, *, line_user_id: str, text: str) -> str:
+            called["service"] = True
+            return "ok"
+
+    monkeypatch.setattr("linebot_app.bot.reply_text", _fake_reply_text)
+    handle_webhook(body='{"events": []}', signature="valid", bot_service=_Service())
+
+    assert called["service"] is True
+    assert called["reply"] is True
+
+
 def test_group_message_with_self_mention_replies(monkeypatch: pytest.MonkeyPatch) -> None:
     event = SimpleNamespace(
         reply_token="reply-token",
