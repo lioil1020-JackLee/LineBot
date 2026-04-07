@@ -27,10 +27,12 @@ _BUILTIN_PRESET_LABELS = {
 
 
 def _icon_path() -> Path | None:
+    exe_parent = Path(getattr(sys, "executable", "")).resolve().parent
     candidates = [
         Path.cwd() / "lioil.ico",
         Path(getattr(sys, "_MEIPASS", "")) / "lioil.ico",
-        Path(getattr(sys, "executable", "")).resolve().parent / "lioil.ico",
+        exe_parent / "lioil.ico",
+        exe_parent / "_internal" / "lioil.ico",
     ]
     for path in candidates:
         if path and path.exists():

@@ -1,6 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
-import sys
+import os
 from pathlib import Path
 
 ONE_FILE = True  # False = onedir, True = onefile
@@ -28,6 +27,8 @@ hidden_imports = [
 datas = [
     (str(PROJECT_ROOT / '.env.example'), '.'),
 ]
+if os.path.exists(PROJECT_ROOT / 'lioil.ico'):
+    datas.append((str(PROJECT_ROOT / 'lioil.ico'), '.'))
 
 binaries = []
 
