@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 import sys
 from pathlib import Path
 
-ONE_FILE = True  # False = onedir, True = onefile
+ONE_FILE = False  # False = onedir, True = onefile
 
 PROJECT_NAME = 'linebot-app'
 PROJECT_ROOT = Path('.').resolve()
@@ -26,7 +26,6 @@ hidden_imports = [
 ]
 
 datas = [
-    (str(PROJECT_ROOT / '.env'), '.'),
     (str(PROJECT_ROOT / '.env.example'), '.'),
 ]
 

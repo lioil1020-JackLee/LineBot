@@ -1,12 +1,42 @@
 from __future__ import annotations
 
 import os
+import shutil
+import sys
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+
+def _is_truthy(value: str) -> bool:
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_runtime_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path.cwd()
+
+
+def _ensure_env_file(base_dir: Path) -> None:
+    env_path = base_dir / ".env"
+    example_path = base_dir / ".env.example"
+    if not example_path.exists() and getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            bundled_example = Path(meipass) / ".env.example"
+            if bundled_example.exists():
+                example_path = bundled_example
+    if env_path.exists() or not example_path.exists():
+        return
+    shutil.copyfile(example_path, env_path)
+
+
+_BASE_DIR = _resolve_runtime_base_dir()
+_ensure_env_file(_BASE_DIR)
+load_dotenv(dotenv_path=_BASE_DIR / ".env")
 
 
 @dataclass(frozen=True)
@@ -16,7 +46,10 @@ class Settings:
     line_bot_name: str = os.getenv("LINE_BOT_NAME", "")
     app_host: str = os.getenv("APP_HOST", "0.0.0.0")
     app_port: int = int(os.getenv("APP_PORT", "8000"))
-    app_reload: bool = os.getenv("APP_RELOAD", "true").lower() in {"1", "true", "yes", "on"}
+    # Frozen executable must disable reload to avoid watchdog respawn loops.
+    app_reload: bool = (
+        False if getattr(sys, "frozen", False) else _is_truthy(os.getenv("APP_RELOAD", "true"))
+    )
     lm_studio_base_url: str = os.getenv("LM_STUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
     lm_studio_exe_path: str = os.getenv("LM_STUDIO_EXE_PATH", "")
     lm_studio_chat_model: str = os.getenv("LM_STUDIO_CHAT_MODEL", "qwen/qwen3.5-9b")
@@ -31,9 +64,9 @@ class Settings:
     session_max_turns: int = int(os.getenv("SESSION_MAX_TURNS", "8"))
     max_context_chars: int = int(os.getenv("MAX_CONTEXT_CHARS", "6000"))
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    rag_enabled: bool = os.getenv("RAG_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+    rag_enabled: bool = _is_truthy(os.getenv("RAG_ENABLED", "false"))
     knowledge_dir: str = os.getenv("KNOWLEDGE_DIR", "data/knowledge")
-    agent_enabled: bool = os.getenv("AGENT_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    agent_enabled: bool = _is_truthy(os.getenv("AGENT_ENABLED", "true"))
     rag_top_k: int = int(os.getenv("RAG_TOP_K", "3"))
     rag_chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "500"))
     rag_chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "100"))
@@ -41,10 +74,12 @@ class Settings:
     perplexity_base_url: str = os.getenv("PERPLEXITY_BASE_URL", "https://api.perplexity.ai")
     perplexity_api_key: str = os.getenv("PERPLEXITY_API_KEY", "")
     perplexity_model: str = os.getenv("PERPLEXITY_MODEL", "sonar")
-    external_llm_fallback_enabled: bool = os.getenv(
-        "EXTERNAL_LLM_FALLBACK_ENABLED",
-        "false",
-    ).lower() in {"1", "true", "yes", "on"}
+    external_llm_fallback_enabled: bool = _is_truthy(
+        os.getenv(
+            "EXTERNAL_LLM_FALLBACK_ENABLED",
+            "false",
+        )
+    )
     external_llm_base_url: str = os.getenv("EXTERNAL_LLM_BASE_URL", "https://openrouter.ai/api/v1")
     external_llm_api_key: str = os.getenv("EXTERNAL_LLM_API_KEY", "")
     external_llm_models: str = os.getenv(
@@ -52,20 +87,10 @@ class Settings:
         "openai/gpt-5-mini,google/gemini-2.5-flash",
     )
     external_llm_timeout_seconds: int = int(os.getenv("EXTERNAL_LLM_TIMEOUT_SECONDS", "45"))
-    image_ocr_enabled: bool = os.getenv("IMAGE_OCR_ENABLED", "true").lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    file_parser_enabled: bool = os.getenv("FILE_PARSER_ENABLED", "true").lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    image_ocr_enabled: bool = _is_truthy(os.getenv("IMAGE_OCR_ENABLED", "true"))
+    file_parser_enabled: bool = _is_truthy(os.getenv("FILE_PARSER_ENABLED", "true"))
     # 假訊息查證功能
-    factcheck_enabled: bool = os.getenv("FACTCHECK_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    factcheck_enabled: bool = _is_truthy(os.getenv("FACTCHECK_ENABLED", "true"))
     factcheck_max_search_queries: int = int(os.getenv("FACTCHECK_MAX_SEARCH_QUERIES", "2"))
     factcheck_max_results_per_query: int = int(os.getenv("FACTCHECK_MAX_RESULTS_PER_QUERY", "4"))
     system_prompt: str = os.getenv(
