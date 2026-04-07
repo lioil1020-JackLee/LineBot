@@ -172,7 +172,8 @@ uv run python scripts/export_metrics_report.py
 |- tests/
 |- .env.example
 |- pyproject.toml
-\- linebot_clean_onefile.spec
+|- linebot-onedir.spec
+\- linebot-onefile.spec
 ```
 
 ## 打包
@@ -182,7 +183,8 @@ uv run python scripts/export_metrics_report.py
 快速指令：
 
 ```powershell
-.\scripts\build.ps1
+uv run build-onedir
+uv run build-onefile
 ```
 
 ## 專案清理與維運建議

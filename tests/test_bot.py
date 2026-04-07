@@ -50,6 +50,10 @@ def test_group_message_without_self_mention_skips_reply(monkeypatch: pytest.Monk
 
     monkeypatch.setattr("linebot_app.bot.parser.parse", lambda _body, _sig: [event])
     monkeypatch.setattr("linebot_app.bot._iter_text_events", lambda _events: [event])
+    monkeypatch.setattr(
+        "linebot_app.bot.settings",
+        SimpleNamespace(line_bot_name="lioil_bot", line_group_require_mention=True),
+    )
 
     called = {"reply": False, "service": False}
 
