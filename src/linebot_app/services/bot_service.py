@@ -2,17 +2,39 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import re
 from uuid import uuid4
 
 from linebot_app.repositories.llm_log_repository import LLMLogRepository
 from linebot_app.repositories.message_repository import MessageRepository
 
+from .factcheck_service import FactCheckService
+from .external_llm_service import ExternalLLMService
 from .llm_service import LLMService, LLMServiceError, LMStudioTimeoutError, LMStudioUnavailableError
 from .prompt_service import PromptService
 from .rag_service import RAGService
 from .session_service import SessionService
 
 logger = logging.getLogger(__name__)
+
+_UNCERTAIN_HINTS = (
+    "不知道",
+    "不清楚",
+    "無法確認",
+    "無法判斷",
+    "不確定",
+    "資訊不足",
+    "我無法",
+    "抱歉，我無法",
+)
+
+_RUNTIME_CAPABILITY_PROMPT = (
+    "\n\n[系統能力說明]\n"
+    "- 你是 LINE Bot，可處理文字訊息。\n"
+    "- 你可處理使用者透過 LINE 上傳的圖片（OCR 後文字）與檔案（PDF/DOCX/XLSX/PPTX/TXT 類）內容。\n"
+    "- 若使用者詢問你是否能讀取文件，應如實回答可透過 LINE 上傳檔案進行解析。\n"
+    "- 僅當解析失敗、格式不支援或權限不足時，才說明限制，不要一概宣稱無法讀取檔案。\n"
+)
 
 # agent_loop 在 linebot_app package 層級
 try:
@@ -35,6 +57,8 @@ class BotService:
         rag_enabled: bool,
         rag_top_k: int,
         max_context_chars: int,
+        factcheck_service: FactCheckService | None = None,
+        external_llm_service: ExternalLLMService | None = None,
     ) -> None:
         self.session_service = session_service
         self.message_repository = message_repository
@@ -45,7 +69,13 @@ class BotService:
         self.rag_enabled = rag_enabled
         self.rag_top_k = rag_top_k
         self.max_context_chars = max_context_chars
+        self.factcheck_service = factcheck_service
+        self.external_llm_service = external_llm_service
         self.agent_enabled: bool = True
+
+    def _looks_uncertain(self, text: str) -> bool:
+        normalized = re.sub(r"\s+", "", text.lower())
+        return any(hint.replace(" ", "") in normalized for hint in _UNCERTAIN_HINTS)
 
     def _truncate_conversation(self, conversation: list[dict[str, str]]) -> list[dict[str, str]]:
         total = 0
@@ -76,6 +106,19 @@ class BotService:
             source="line",
         )
 
+        # 假訊息查證路由：若訊息屬可查證主張，進入查證流程並提早回傳
+        if self.factcheck_service is not None:
+            factcheck_result = self.factcheck_service.try_factcheck(incoming_text)
+            if factcheck_result is not None:
+                self.message_repository.add_message(
+                    session_id=session.id,
+                    role="assistant",
+                    content=factcheck_result,
+                    source="line",
+                )
+                self.session_service.mark_activity(session.id)
+                return factcheck_result
+
         conversation = [
             {"role": message.role, "content": message.content}
             for message in context
@@ -83,7 +126,7 @@ class BotService:
         ]
         conversation.append({"role": "user", "content": incoming_text})
         conversation = self._truncate_conversation(conversation)
-        system_prompt = self.prompt_service.get_active_prompt()
+        system_prompt = self.prompt_service.get_active_prompt() + _RUNTIME_CAPABILITY_PROMPT
         source_markers: list[str] = []
 
         if self.rag_enabled and self.rag_service is not None:
@@ -132,6 +175,30 @@ class BotService:
                     system_prompt=system_prompt,
                     conversation=conversation,
                 )
+
+            # 第二層備援：若本地模型最終回答仍不確定，嘗試外部模型（可選）。
+            if (
+                self.external_llm_service is not None
+                and self.external_llm_service.enabled
+                and self._looks_uncertain(reply.text)
+            ):
+                external_reply = self.external_llm_service.generate_reply(
+                    system_prompt=system_prompt,
+                    conversation=conversation,
+                    max_tokens=self.llm_service.max_tokens,
+                    temperature=self.llm_service.temperature,
+                )
+                if external_reply is not None:
+                    from .llm_service import LLMReply
+
+                    reply = LLMReply(
+                        text=external_reply.text,
+                        model_name=external_reply.model_name,
+                        latency_ms=0,
+                        prompt_tokens=None,
+                        completion_tokens=None,
+                        total_tokens=None,
+                    )
         except LMStudioUnavailableError:
             self.llm_log_repository.add_log(
                 request_id=request_id,

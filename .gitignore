@@ -25,3 +25,6 @@ dist/
 *.spec.bak
 *.egg-info/
 .pyinstaller/
+
+# Local test/tool artifacts
+MagicMock/

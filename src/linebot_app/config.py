@@ -19,7 +19,7 @@ class Settings:
     app_reload: bool = os.getenv("APP_RELOAD", "true").lower() in {"1", "true", "yes", "on"}
     lm_studio_base_url: str = os.getenv("LM_STUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
     lm_studio_exe_path: str = os.getenv("LM_STUDIO_EXE_PATH", "")
-    lm_studio_chat_model: str = os.getenv("LM_STUDIO_CHAT_MODEL", "qwen/qwen2.5-7b-instruct")
+    lm_studio_chat_model: str = os.getenv("LM_STUDIO_CHAT_MODEL", "qwen/qwen3.5-9b")
     lm_studio_embed_model: str = os.getenv(
         "LM_STUDIO_EMBED_MODEL",
         "text-embedding-nomic-embed-text-v1.5",
@@ -37,6 +37,37 @@ class Settings:
     rag_top_k: int = int(os.getenv("RAG_TOP_K", "3"))
     rag_chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "500"))
     rag_chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "100"))
+    web_search_provider: str = os.getenv("WEB_SEARCH_PROVIDER", "duckduckgo")
+    perplexity_base_url: str = os.getenv("PERPLEXITY_BASE_URL", "https://api.perplexity.ai")
+    perplexity_api_key: str = os.getenv("PERPLEXITY_API_KEY", "")
+    perplexity_model: str = os.getenv("PERPLEXITY_MODEL", "sonar")
+    external_llm_fallback_enabled: bool = os.getenv(
+        "EXTERNAL_LLM_FALLBACK_ENABLED",
+        "false",
+    ).lower() in {"1", "true", "yes", "on"}
+    external_llm_base_url: str = os.getenv("EXTERNAL_LLM_BASE_URL", "https://openrouter.ai/api/v1")
+    external_llm_api_key: str = os.getenv("EXTERNAL_LLM_API_KEY", "")
+    external_llm_models: str = os.getenv(
+        "EXTERNAL_LLM_MODELS",
+        "openai/gpt-5-mini,google/gemini-2.5-flash",
+    )
+    external_llm_timeout_seconds: int = int(os.getenv("EXTERNAL_LLM_TIMEOUT_SECONDS", "45"))
+    image_ocr_enabled: bool = os.getenv("IMAGE_OCR_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    file_parser_enabled: bool = os.getenv("FILE_PARSER_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    # 假訊息查證功能
+    factcheck_enabled: bool = os.getenv("FACTCHECK_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    factcheck_max_search_queries: int = int(os.getenv("FACTCHECK_MAX_SEARCH_QUERIES", "2"))
+    factcheck_max_results_per_query: int = int(os.getenv("FACTCHECK_MAX_RESULTS_PER_QUERY", "4"))
     system_prompt: str = os.getenv(
         "SYSTEM_PROMPT",
         (

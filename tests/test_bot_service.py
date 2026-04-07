@@ -6,6 +6,7 @@ from linebot_app.repositories.message_repository import MessageRepository
 from linebot_app.repositories.prompt_repository import PromptRepository
 from linebot_app.repositories.session_repository import SessionRepository
 from linebot_app.services.bot_service import BotService
+from linebot_app.services.external_llm_service import ExternalLLMReply
 from linebot_app.services.llm_service import LLMReply, LLMServiceError
 from linebot_app.services.prompt_service import PromptService
 from linebot_app.services.rag_service import RetrievedChunk
@@ -14,6 +15,8 @@ from linebot_app.services.session_service import SessionService
 
 class _FakeLLMService:
     chat_model = "fake-model"
+    max_tokens = 1024
+    temperature = 0.7
 
     def __init__(self, *, raises: Exception | None = None) -> None:
         self.raises = raises
@@ -41,6 +44,13 @@ class _FakeRAGService:
                 score=0.9,
             )
         ]
+
+
+class _FakeExternalLLMService:
+    enabled = True
+
+    def generate_reply(self, **kwargs) -> ExternalLLMReply | None:
+        return ExternalLLMReply(text="外部模型補充答案", model_name="openai/gpt-5-mini")
 
 
 def _build_service(tmp_path) -> tuple[BotService, LLMLogRepository, MessageRepository]:
@@ -151,3 +161,48 @@ def test_bot_service_adds_rag_citations(tmp_path) -> None:
 
     assert "參考來源" in reply
     assert "guide.md#0" in reply
+
+
+def test_bot_service_uses_external_fallback_when_uncertain(tmp_path) -> None:
+    db_path = str(tmp_path / "app.db")
+    init_db(db_path)
+
+    session_repo = SessionRepository(db_path)
+    message_repo = MessageRepository(db_path)
+    prompt_repo = PromptRepository(db_path)
+    llm_log_repo = LLMLogRepository(db_path)
+
+    session_service = SessionService(
+        session_repository=session_repo,
+        message_repository=message_repo,
+        max_turns=8,
+    )
+    prompt_service = PromptService(prompt_repository=prompt_repo, default_prompt="請使用繁體中文")
+    llm = _FakeLLMService()
+    # 本地模型先回不確定，應觸發外部模型補答。
+    llm.generate_reply = lambda **kwargs: LLMReply(
+        text="抱歉，我無法確認這題。",
+        model_name="fake-model",
+        latency_ms=120,
+        prompt_tokens=10,
+        completion_tokens=20,
+        total_tokens=30,
+    )
+
+    service = BotService(
+        session_service=session_service,
+        message_repository=message_repo,
+        llm_log_repository=llm_log_repo,
+        llm_service=llm,
+        prompt_service=prompt_service,
+        rag_service=None,
+        rag_enabled=False,
+        rag_top_k=3,
+        max_context_chars=6000,
+        external_llm_service=_FakeExternalLLMService(),
+    )
+    service.agent_enabled = False
+
+    reply = service.handle_user_message(line_user_id="u4", text="GPT-4o 發布時間？")
+
+    assert "外部模型補充答案" in reply

@@ -48,6 +48,21 @@ _TOOL_CALL_RE = re.compile(
 )
 
 _MAX_TOOL_ROUNDS = 3
+_AUTO_SEARCH_TOOL = "web_search"
+_UNCERTAIN_HINTS = (
+    "不知道",
+    "不清楚",
+    "無法確認",
+    "無法判斷",
+    "不確定",
+    "資訊不足",
+    "我無法",
+    "我不確定",
+    "can't",
+    "cannot",
+    "not sure",
+    "i don't know",
+)
 
 
 @dataclass
@@ -122,6 +137,7 @@ def run_agent_loop(
     """
     tool_steps: list[ToolCallStep] = []
     current_conversation = list(conversation)
+    auto_search_used = False
     # 工具說明附加在 system prompt 後
     augmented_system = system_prompt + "\n\n" + TOOLS_SYSTEM_PROMPT
 
@@ -143,6 +159,21 @@ def run_agent_loop(
 
         parsed = _parse_tool_call(text)
         if parsed is None:
+            # 如果模型直接說不確定，且尚未用過工具，強制補一次 web_search 再回答。
+            if (not auto_search_used) and _looks_uncertain(text):
+                query = _extract_latest_user_query(current_conversation)
+                if query:
+                    tool_result = _run_tool(_AUTO_SEARCH_TOOL, {"query": query})
+                    tool_steps.append(
+                        ToolCallStep(tool=_AUTO_SEARCH_TOOL, args={"query": query}, result=tool_result)
+                    )
+                    auto_search_used = True
+                    current_conversation.append({"role": "assistant", "content": text})
+                    current_conversation.append({
+                        "role": "user",
+                        "content": f"<tool_result>\n{tool_result}\n</tool_result>",
+                    })
+                    continue
             # 模型沒有要求工具 — 這就是最終答案
             return AgentLoopResult(
                 final_answer=text,
@@ -169,3 +200,17 @@ def run_agent_loop(
         tool_steps=tool_steps,
         rounds=_MAX_TOOL_ROUNDS,
     )
+
+
+def _looks_uncertain(text: str) -> bool:
+    lower = text.lower()
+    return any(hint in lower for hint in _UNCERTAIN_HINTS)
+
+
+def _extract_latest_user_query(conversation: list[dict[str, str]]) -> str:
+    for item in reversed(conversation):
+        if item.get("role") == "user":
+            content = (item.get("content") or "").strip()
+            if content and "<tool_result>" not in content:
+                return content
+    return ""

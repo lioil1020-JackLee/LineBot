@@ -159,3 +159,37 @@ def test_run_agent_loop_max_rounds(monkeypatch):
 
     assert result.rounds == 4
     assert len(result.tool_steps) == 3  # 第 4 輪不執行工具
+
+
+def test_run_agent_loop_auto_search_when_uncertain(monkeypatch):
+    monkeypatch.setattr(
+        "linebot_app.agent_loop._run_tool",
+        lambda tool, args: "搜尋結果：維基百科說明...",
+    )
+    llm = _make_llm([
+        "我不確定這個答案。",
+        "我查到資料了：根據維基百科...",
+    ])
+    result = run_agent_loop(
+        llm_service=llm,
+        system_prompt="你是助理",
+        conversation=[{"role": "user", "content": "量子糾纏是什麼？"}],
+    )
+    assert "我查到資料了" in result.final_answer
+    assert len(result.tool_steps) == 1
+    assert result.tool_steps[0].tool == "web_search"
+
+
+def test_run_agent_loop_uncertain_without_user_query(monkeypatch):
+    monkeypatch.setattr(
+        "linebot_app.agent_loop._run_tool",
+        lambda tool, args: "不應被呼叫",
+    )
+    llm = _make_llm(["我不確定這個答案。"])
+    result = run_agent_loop(
+        llm_service=llm,
+        system_prompt="你是助理",
+        conversation=[{"role": "assistant", "content": "前文"}],
+    )
+    assert result.final_answer == "我不確定這個答案。"
+    assert result.tool_steps == []

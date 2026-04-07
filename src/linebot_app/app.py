@@ -17,6 +17,9 @@ from .repositories import (
 )
 from .services import (
     BotService,
+    ExternalLLMService,
+    FactCheckConfig,
+    FactCheckService,
     HealthService,
     LLMService,
     PromptService,
@@ -26,6 +29,15 @@ from .services import (
 
 settings = get_settings()
 init_db(settings.sqlite_path)
+
+
+def _get_default_search_fn():
+    """回傳可用的搜尋函式；若 duckduckgo_search 未安裝則回傳 None。"""
+    try:
+        from .tools.web_search import web_search
+        return web_search
+    except Exception:
+        return None
 
 
 @asynccontextmanager
@@ -68,6 +80,16 @@ session_service = SessionService(
     message_repository=message_repository,
     max_turns=settings.session_max_turns,
 )
+external_llm_service = (
+    ExternalLLMService(
+        base_url=settings.external_llm_base_url,
+        api_key=settings.external_llm_api_key,
+        model_candidates=[m.strip() for m in settings.external_llm_models.split(",")],
+        timeout_seconds=settings.external_llm_timeout_seconds,
+    )
+    if settings.external_llm_fallback_enabled
+    else None
+)
 bot_service = BotService(
     session_service=session_service,
     message_repository=message_repository,
@@ -78,6 +100,19 @@ bot_service = BotService(
     rag_enabled=settings.rag_enabled,
     rag_top_k=settings.rag_top_k,
     max_context_chars=settings.max_context_chars,
+    external_llm_service=external_llm_service,
+    factcheck_service=(
+        FactCheckService(
+            llm_service=llm_service,
+            search_fn=_get_default_search_fn(),
+            config=FactCheckConfig(
+                max_search_queries=settings.factcheck_max_search_queries,
+                max_results_per_query=settings.factcheck_max_results_per_query,
+            ),
+        )
+        if settings.factcheck_enabled
+        else None
+    ),
 )
 bot_service.agent_enabled = settings.agent_enabled
 health_service = HealthService(

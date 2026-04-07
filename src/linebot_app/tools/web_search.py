@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +29,19 @@ def web_search(query: str, max_results: int = _MAX_RESULTS) -> list[SearchResult
     Returns:
         SearchResult 清單，失敗時回傳空清單
     """
+    provider = os.getenv("WEB_SEARCH_PROVIDER", "duckduckgo").strip().lower()
+    if provider == "perplexity":
+        return _web_search_perplexity(query=query, max_results=max_results)
+
     try:
-        from duckduckgo_search import DDGS  # type: ignore[import-untyped]
+        from ddgs import DDGS  # type: ignore[import-untyped]
     except ModuleNotFoundError:
-        logger.warning("duckduckgo_search not installed; web_search disabled")
-        return []
+        # Backward compatibility for environments that still keep old package name.
+        try:
+            from duckduckgo_search import DDGS  # type: ignore[import-untyped]
+        except ModuleNotFoundError:
+            logger.warning("ddgs not installed; web_search disabled")
+            return []
 
     results: list[SearchResult] = []
     try:
@@ -50,6 +61,73 @@ def web_search(query: str, max_results: int = _MAX_RESULTS) -> list[SearchResult
         logger.exception("web_search error for query=%r", query)
 
     return results
+
+
+def _web_search_perplexity(query: str, max_results: int = _MAX_RESULTS) -> list[SearchResult]:
+    api_key = os.getenv("PERPLEXITY_API_KEY", "").strip()
+    if not api_key:
+        logger.warning("PERPLEXITY_API_KEY missing; fallback to empty results")
+        return []
+
+    base_url = os.getenv("PERPLEXITY_BASE_URL", "https://api.perplexity.ai").rstrip("/")
+    model = os.getenv("PERPLEXITY_MODEL", "sonar")
+
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a web research assistant. Provide concise factual answer.",
+            },
+            {
+                "role": "user",
+                "content": query,
+            },
+        ],
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            response = client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+        if response.status_code >= 400:
+            logger.warning("perplexity search failed status=%s", response.status_code)
+            return []
+
+        data = response.json()
+        answer = (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+        citations = data.get("citations") or []
+        results: list[SearchResult] = []
+
+        for url in citations[: max(1, min(max_results, 10))]:
+            link = str(url).strip()
+            if not link:
+                continue
+            results.append(
+                SearchResult(
+                    title="Perplexity Citation",
+                    url=link,
+                    snippet=answer[:_SNIPPET_MAX_CHARS] if answer else "",
+                )
+            )
+
+        if results:
+            return results
+        if answer:
+            return [
+                SearchResult(
+                    title="Perplexity Answer",
+                    url="",
+                    snippet=answer[:_SNIPPET_MAX_CHARS],
+                )
+            ]
+    except Exception:
+        logger.exception("web_search perplexity error for query=%r", query)
+
+    return []
 
 
 def format_search_results(results: list[SearchResult]) -> str:
