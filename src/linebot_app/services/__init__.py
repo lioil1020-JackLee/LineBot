@@ -7,9 +7,9 @@ from .profile_memory_service import ProfileMemoryService
 from .prompt_service import PromptService
 from .rag_service import RAGService
 from .response_guard_service import ResponseGuardResult, ResponseGuardService
+from .session_service import SessionService
 from .source_scoring_service import SourceScoringService
 from .task_memory_service import TaskMemoryService
-from .session_service import SessionService
 
 __all__ = [
 	"BotService",

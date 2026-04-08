@@ -4,7 +4,7 @@ import re
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 
 from .bot import handle_webhook
 from .config import get_settings
@@ -90,11 +90,14 @@ persona_repository = PersonaRepository(settings.sqlite_path)
 persona_repository.ensure_builtin_presets(_PERSONA_PRESETS)
 
 if settings.roleplay_enabled and settings.roleplay_persona_prompt.strip():
-    persona_repository.upsert_custom(
+    env_roleplay = persona_repository.upsert_custom(
         name="env_roleplay",
         prompt=settings.roleplay_persona_prompt.strip(),
-        set_active=True,
+        set_active=False,
     )
+    active_after_boot = persona_repository.get_active()
+    if active_after_boot is None or active_after_boot.name == "default":
+        persona_repository.set_active(env_roleplay.name)
 
 active_persona = persona_repository.get_active()
 llm_service = LLMService(
@@ -136,6 +139,8 @@ response_guard_service = ResponseGuardService(
     llm_service=llm_service,
     enabled=settings.response_guard_enabled,
     rewrite_enabled=settings.response_guard_rewrite_enabled,
+    max_input_chars=settings.response_guard_max_input_chars,
+    timeout_seconds=settings.lm_studio_guard_timeout_seconds,
 )
 source_scoring_service = SourceScoringService()
 profile_memory_service = ProfileMemoryService()
@@ -162,6 +167,11 @@ bot_service = BotService(
     task_memory_service=task_memory_service,
     external_llm_service=external_llm_service,
     persona_prompt=(active_persona.prompt if active_persona is not None else ""),
+    roleplay_priority_mode=settings.roleplay_priority_mode,
+    response_guard_skip_when_persona=settings.response_guard_skip_when_persona,
+    agent_fast_mode=settings.agent_fast_mode,
+    agent_auto_search=settings.agent_auto_search,
+    agent_max_tool_rounds=settings.agent_max_tool_rounds,
     factcheck_service=(
         FactCheckService(
             llm_service=llm_service,
@@ -514,6 +524,7 @@ def admin_persona_import(payload: dict[str, object] | None = None) -> dict[str, 
 @app.post("/webhook")
 async def webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_line_signature: str = Header(default="", alias="X-Line-Signature"),
 ) -> dict[str, bool]:
     if not settings.line_ready:
@@ -525,7 +536,12 @@ async def webhook(
     body = (await request.body()).decode("utf-8")
 
     try:
-        handle_webhook(body=body, signature=x_line_signature, bot_service=bot_service)
+        handle_webhook(
+            body=body,
+            signature=x_line_signature,
+            bot_service=bot_service,
+            schedule_background_task=background_tasks.add_task,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

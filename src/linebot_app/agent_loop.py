@@ -96,7 +96,8 @@ def _parse_tool_call(text: str) -> tuple[str, dict] | None:
 
 
 def _run_web_search(args: dict) -> str:
-    from .tools.web_search import format_search_results, web_search as _ws
+    from .tools.web_search import format_search_results
+    from .tools.web_search import web_search as _ws
 
     query = str(args.get("query", ""))
     if not query:
@@ -128,6 +129,9 @@ def run_agent_loop(
     llm_service: LLMService,
     system_prompt: str,
     conversation: list[dict[str, str]],
+    fast_mode: bool = True,
+    auto_search_enabled: bool = False,
+    max_tool_rounds: int = _MAX_TOOL_ROUNDS,
 ) -> AgentLoopResult:
     """
     ReAct-style agent loop：
@@ -141,7 +145,8 @@ def run_agent_loop(
     # 工具說明附加在 system prompt 後
     augmented_system = system_prompt + "\n\n" + TOOLS_SYSTEM_PROMPT
 
-    for round_idx in range(_MAX_TOOL_ROUNDS + 1):
+    effective_max_rounds = max(0, max_tool_rounds)
+    for round_idx in range(effective_max_rounds + 1):
         reply = llm_service.generate_reply(
             system_prompt=augmented_system,
             conversation=current_conversation,
@@ -149,7 +154,7 @@ def run_agent_loop(
         text = reply.text
 
         # 最後一輪強制回傳（不執行工具）
-        if round_idx >= _MAX_TOOL_ROUNDS:
+        if round_idx >= effective_max_rounds:
             logger.debug("agent_loop: hit max rounds, returning final answer")
             return AgentLoopResult(
                 final_answer=text,
@@ -159,13 +164,23 @@ def run_agent_loop(
 
         parsed = _parse_tool_call(text)
         if parsed is None:
+            if fast_mode:
+                return AgentLoopResult(
+                    final_answer=text,
+                    tool_steps=tool_steps,
+                    rounds=round_idx + 1,
+                )
             # 如果模型直接說不確定，且尚未用過工具，強制補一次 web_search 再回答。
-            if (not auto_search_used) and _looks_uncertain(text):
+            if auto_search_enabled and (not auto_search_used) and _looks_uncertain(text):
                 query = _extract_latest_user_query(current_conversation)
                 if query:
                     tool_result = _run_tool(_AUTO_SEARCH_TOOL, {"query": query})
                     tool_steps.append(
-                        ToolCallStep(tool=_AUTO_SEARCH_TOOL, args={"query": query}, result=tool_result)
+                        ToolCallStep(
+                            tool=_AUTO_SEARCH_TOOL,
+                            args={"query": query},
+                            result=tool_result,
+                        )
                     )
                     auto_search_used = True
                     current_conversation.append({"role": "assistant", "content": text})
@@ -198,7 +213,7 @@ def run_agent_loop(
     return AgentLoopResult(
         final_answer="（嘗試取得資訊但未能完成）",
         tool_steps=tool_steps,
-        rounds=_MAX_TOOL_ROUNDS,
+        rounds=effective_max_rounds,
     )
 
 

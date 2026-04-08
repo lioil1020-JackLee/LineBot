@@ -67,7 +67,14 @@ class _FakeExternalLLMService:
 
 
 class _FakeResponseGuardService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def should_review(self, **kwargs) -> bool:
+        return True
+
     def review(self, **kwargs) -> ResponseGuardResult:
+        self.calls += 1
         return ResponseGuardResult(
             approved=True,
             score=78,
@@ -383,6 +390,172 @@ def test_bot_service_applies_persona_prompt(tmp_path) -> None:
 
     assert "[角色設定]" in fake_llm.last_system_prompt
     assert "溫柔的虛擬情人" in fake_llm.last_system_prompt
+
+
+def test_bot_service_roleplay_priority_rewrites_base_prompt(tmp_path) -> None:
+    db_path = str(tmp_path / "app.db")
+    init_db(db_path)
+
+    session_repo = SessionRepository(db_path)
+    message_repo = MessageRepository(db_path)
+    prompt_repo = PromptRepository(db_path)
+    llm_log_repo = LLMLogRepository(db_path)
+    fake_llm = _FakeLLMService()
+
+    session_service = SessionService(
+        session_repository=session_repo,
+        message_repository=message_repo,
+        max_turns=8,
+    )
+    prompt_service = PromptService(
+        prompt_repository=prompt_repo,
+        default_prompt="你是 LINE 萬事通助理，請條理清楚地回答。",
+    )
+    service = BotService(
+        session_service=session_service,
+        message_repository=message_repo,
+        llm_log_repository=llm_log_repo,
+        llm_service=fake_llm,
+        prompt_service=prompt_service,
+        rag_service=None,
+        rag_enabled=False,
+        rag_top_k=3,
+        max_context_chars=6000,
+        persona_prompt="你現在是溫柔的虛擬情人。",
+        roleplay_priority_mode=True,
+    )
+    service.agent_enabled = False
+
+    service.handle_user_message(line_user_id="u-roleplay", text="今天好累")
+
+    assert "優先遵從角色設定" in fake_llm.last_system_prompt
+    assert "萬事通助理" not in fake_llm.last_system_prompt
+
+
+def test_bot_service_skips_coding_gate_when_persona_enabled(tmp_path) -> None:
+    db_path = str(tmp_path / "app.db")
+    init_db(db_path)
+
+    session_repo = SessionRepository(db_path)
+    message_repo = MessageRepository(db_path)
+    prompt_repo = PromptRepository(db_path)
+    llm_log_repo = LLMLogRepository(db_path)
+
+    session_service = SessionService(
+        session_repository=session_repo,
+        message_repository=message_repo,
+        max_turns=8,
+    )
+    prompt_service = PromptService(prompt_repository=prompt_repo, default_prompt="請使用繁體中文")
+    service = BotService(
+        session_service=session_service,
+        message_repository=message_repo,
+        llm_log_repository=llm_log_repo,
+        llm_service=_FakeLLMService(),
+        prompt_service=prompt_service,
+        rag_service=None,
+        rag_enabled=False,
+        rag_top_k=3,
+        max_context_chars=6000,
+        coding_assistance_enabled=False,
+        persona_prompt="你現在是可靠好友。",
+    )
+    service.agent_enabled = False
+
+    reply = service.handle_user_message(
+        line_user_id="u-persona-code",
+        text="想聊聊 Python 學習方向",
+    )
+
+    assert reply == "測試回覆"
+
+
+def test_bot_service_skips_guard_when_persona_enabled(tmp_path) -> None:
+    db_path = str(tmp_path / "app.db")
+    init_db(db_path)
+
+    session_repo = SessionRepository(db_path)
+    message_repo = MessageRepository(db_path)
+    prompt_repo = PromptRepository(db_path)
+    llm_log_repo = LLMLogRepository(db_path)
+    guard = _FakeResponseGuardService()
+
+    session_service = SessionService(
+        session_repository=session_repo,
+        message_repository=message_repo,
+        max_turns=8,
+    )
+    prompt_service = PromptService(prompt_repository=prompt_repo, default_prompt="請使用繁體中文")
+    service = BotService(
+        session_service=session_service,
+        message_repository=message_repo,
+        llm_log_repository=llm_log_repo,
+        llm_service=_FakeLLMService(),
+        prompt_service=prompt_service,
+        rag_service=None,
+        rag_enabled=False,
+        rag_top_k=3,
+        max_context_chars=6000,
+        response_guard_service=guard,
+        persona_prompt="你現在是溫柔的虛擬情人。",
+        response_guard_skip_when_persona=True,
+    )
+    service.agent_enabled = False
+
+    reply = service.handle_user_message(line_user_id="u-guard-skip", text="陪我聊天")
+
+    assert reply == "測試回覆"
+    assert guard.calls == 0
+
+
+def test_bot_service_schedules_session_memory_in_background(tmp_path) -> None:
+    db_path = str(tmp_path / "app.db")
+    init_db(db_path)
+
+    session_repo = SessionRepository(db_path)
+    message_repo = MessageRepository(db_path)
+    prompt_repo = PromptRepository(db_path)
+    llm_log_repo = LLMLogRepository(db_path)
+    memory_repo = SessionMemoryRepository(db_path)
+
+    session_service = SessionService(
+        session_repository=session_repo,
+        message_repository=message_repo,
+        max_turns=8,
+    )
+    prompt_service = PromptService(prompt_repository=prompt_repo, default_prompt="請使用繁體中文")
+    service = BotService(
+        session_service=session_service,
+        message_repository=message_repo,
+        llm_log_repository=llm_log_repo,
+        llm_service=_FakeLLMService(),
+        prompt_service=prompt_service,
+        rag_service=None,
+        rag_enabled=False,
+        rag_top_k=3,
+        max_context_chars=6000,
+        session_memory_repository=memory_repo,
+        session_memory_enabled=True,
+        session_memory_trigger_messages=2,
+        session_memory_window_messages=6,
+        session_memory_max_chars=500,
+    )
+    service.agent_enabled = False
+    scheduled: list[tuple[object, dict[str, object]]] = []
+
+    def _schedule(func, **kwargs):
+        scheduled.append((func, kwargs))
+
+    service.handle_user_message(
+        line_user_id="u-memory-bg",
+        text="你好",
+        schedule_background_task=_schedule,
+    )
+
+    assert len(scheduled) == 1
+    func, kwargs = scheduled[0]
+    assert getattr(func, "__name__", "") == "_try_update_session_memory"
+    assert "session_id" in kwargs
 
 
 def test_bot_service_adds_rag_citations(tmp_path) -> None:

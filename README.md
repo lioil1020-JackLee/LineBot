@@ -106,6 +106,7 @@ uv run python scripts/export_metrics_report.py
 - `LM_STUDIO_CHAT_MODEL`
 - `LM_STUDIO_EMBED_MODEL`
 - `LM_STUDIO_TIMEOUT_SECONDS`
+- `LM_STUDIO_GUARD_TIMEOUT_SECONDS`（守門審核專用較短 timeout）
 
 ### 功能開關
 
@@ -114,6 +115,9 @@ uv run python scripts/export_metrics_report.py
 - `IMAGE_OCR_ENABLED`
 - `FILE_PARSER_ENABLED`
 - `AGENT_ENABLED`
+- `AGENT_FAST_MODE`
+- `AGENT_AUTO_SEARCH`
+- `AGENT_MAX_TOOL_ROUNDS`
 - `EXTERNAL_LLM_FALLBACK_ENABLED`
 
 ### Session 記憶
@@ -126,8 +130,26 @@ uv run python scripts/export_metrics_report.py
 - `CODING_ASSISTANCE_ENABLED`（設 `false` 時不提供程式碼讀寫/除錯）
 - `RESPONSE_GUARD_ENABLED`（回答品質守門）
 - `RESPONSE_GUARD_REWRITE_ENABLED`（守門未通過時自動重寫）
+- `RESPONSE_GUARD_MAX_INPUT_CHARS`（長文直接略過 guard，避免額外延遲）
+- `RESPONSE_GUARD_SKIP_WHEN_PERSONA`（有角色設定時略過 guard）
 - `ROLEPLAY_ENABLED`（是否啟用角色扮演人設）
 - `ROLEPLAY_PERSONA_PROMPT`（自訂角色描述）
+- `ROLEPLAY_PRIORITY_MODE`（有角色時弱化預設助理口吻，優先遵從角色）
+
+## 角色扮演與延遲調校
+
+- 若你用 `.env` 設定 `ROLEPLAY_PERSONA_PROMPT`，服務啟動時會建立 `env_roleplay` preset；當目前 active persona 仍是 `default` 時，會自動切換到它。
+- 若你之後改用 tray 或 `/admin/persona` 切換角色，新的 active persona 會立即生效，不需重啟。
+- 預設已啟用 `ROLEPLAY_PRIORITY_MODE=true`，會在有人設時弱化「萬事通助理」口吻，讓角色回覆更穩定。
+- 當 persona 存在時，coding gate 與 response guard 會避免搶先打斷角色互動。
+- 想優先壓低延遲時，可先保留 `AGENT_FAST_MODE=true`、`AGENT_AUTO_SEARCH=false`、`AGENT_MAX_TOOL_ROUNDS=2`，並視硬體情況關閉 `SESSION_MEMORY_ENABLED` 或 `RESPONSE_GUARD_ENABLED`。
+
+## 錯誤排查
+
+- 先查 `GET /admin/llm-logs`，觀察最新 `status` 與 `error_message`。
+- 若看到 `LM Studio request failed: 400` 這類訊息，通常代表模型名稱與 LM Studio 目前載入模型不一致。
+- 若延遲偏高，可先輪流關閉 `AGENT_ENABLED`、`RESPONSE_GUARD_ENABLED`、`SESSION_MEMORY_ENABLED` 做對照。
+- Session memory 已改為背景更新；若回覆本身正常但摘要偶爾沒更新，通常是背景任務被 timeout 或略過，優先檢查 LLM logs。
 
 ## API 端點
 
@@ -220,4 +242,3 @@ uv run build-onefile
 - 定期執行 `cleanup_runtime.py`，避免資料檔持續膨脹。
 - 每次變更後先跑 `pytest` 與 `ruff check`。
 - 文件變更應與程式同步提交，避免規格與實作脫節。
-

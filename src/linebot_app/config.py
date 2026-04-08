@@ -60,6 +60,9 @@ class Settings:
         "text-embedding-nomic-embed-text-v1.5",
     )
     lm_studio_timeout_seconds: int = int(os.getenv("LM_STUDIO_TIMEOUT_SECONDS", "90"))
+    lm_studio_guard_timeout_seconds: int = int(
+        os.getenv("LM_STUDIO_GUARD_TIMEOUT_SECONDS", "20")
+    )
     lm_studio_max_tokens: int = int(os.getenv("LM_STUDIO_MAX_TOKENS", "1024"))
     lm_studio_temperature: float = float(os.getenv("LM_STUDIO_TEMPERATURE", "0.7"))
     sqlite_path: str = os.getenv("SQLITE_PATH", "data/app.db")
@@ -73,13 +76,23 @@ class Settings:
     response_guard_rewrite_enabled: bool = _is_truthy(
         os.getenv("RESPONSE_GUARD_REWRITE_ENABLED", "true")
     )
+    response_guard_max_input_chars: int = int(
+        os.getenv("RESPONSE_GUARD_MAX_INPUT_CHARS", "4000")
+    )
+    response_guard_skip_when_persona: bool = _is_truthy(
+        os.getenv("RESPONSE_GUARD_SKIP_WHEN_PERSONA", "true")
+    )
     roleplay_enabled: bool = _is_truthy(os.getenv("ROLEPLAY_ENABLED", "false"))
     roleplay_persona_prompt: str = os.getenv("ROLEPLAY_PERSONA_PROMPT", "")
+    roleplay_priority_mode: bool = _is_truthy(os.getenv("ROLEPLAY_PRIORITY_MODE", "true"))
     max_context_chars: int = int(os.getenv("MAX_CONTEXT_CHARS", "6000"))
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     rag_enabled: bool = _is_truthy(os.getenv("RAG_ENABLED", "false"))
     knowledge_dir: str = os.getenv("KNOWLEDGE_DIR", "data/knowledge")
     agent_enabled: bool = _is_truthy(os.getenv("AGENT_ENABLED", "true"))
+    agent_fast_mode: bool = _is_truthy(os.getenv("AGENT_FAST_MODE", "true"))
+    agent_auto_search: bool = _is_truthy(os.getenv("AGENT_AUTO_SEARCH", "false"))
+    agent_max_tool_rounds: int = int(os.getenv("AGENT_MAX_TOOL_ROUNDS", "2"))
     rag_top_k: int = int(os.getenv("RAG_TOP_K", "3"))
     rag_chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "500"))
     rag_chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "100"))

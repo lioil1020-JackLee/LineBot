@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 import logging
 import re
+from collections.abc import Callable, Iterable
 
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
@@ -14,13 +14,17 @@ from linebot.v3.messaging import (
     TextMessage,
 )
 from linebot.v3.webhook import WebhookParser
-from linebot.v3.webhooks import ImageMessageContent, MessageEvent, TextMessageContent
-from linebot.v3.webhooks import FileMessageContent
+from linebot.v3.webhooks import (
+    FileMessageContent,
+    ImageMessageContent,
+    MessageEvent,
+    TextMessageContent,
+)
 
 from .config import get_settings
+from .services.bot_service import BotService
 from .services.document_parser_service import DocumentParserService
 from .services.image_ocr_service import ImageOCRService
-from .services.bot_service import BotService
 
 settings = get_settings()
 parser = WebhookParser(settings.line_channel_secret or "development-secret")
@@ -148,7 +152,12 @@ def _strip_self_mentions_from_text(event: MessageEvent, text: str) -> str:
     return text.strip()
 
 
-def handle_webhook(body: str, signature: str, bot_service: BotService) -> None:
+def handle_webhook(
+    body: str,
+    signature: str,
+    bot_service: BotService,
+    schedule_background_task: Callable[..., object] | None = None,
+) -> None:
     try:
         events = parser.parse(body, signature)
     except InvalidSignatureError as exc:
@@ -167,7 +176,11 @@ def handle_webhook(body: str, signature: str, bot_service: BotService) -> None:
         if not incoming_text:
             continue
         line_user_id = _extract_line_user_id(event)
-        reply = bot_service.handle_user_message(line_user_id=line_user_id, text=incoming_text)
+        reply = bot_service.handle_user_message(
+            line_user_id=line_user_id,
+            text=incoming_text,
+            schedule_background_task=schedule_background_task,
+        )
         reply_text(reply_token, reply)
 
     if getattr(settings, "image_ocr_enabled", True):
@@ -201,7 +214,10 @@ def handle_webhook(body: str, signature: str, bot_service: BotService) -> None:
                 continue
 
             if not ocr_text.strip():
-                reply_text(reply_token, "我有收到圖片，但沒有辨識到可用文字，請改傳清晰截圖或文字內容。")
+                reply_text(
+                    reply_token,
+                    "我有收到圖片，但沒有辨識到可用文字，請改傳清晰截圖或文字內容。",
+                )
                 continue
 
             prompt = (
@@ -209,7 +225,11 @@ def handle_webhook(body: str, signature: str, bot_service: BotService) -> None:
                 f"{ocr_text}\n\n"
                 "請先簡短提醒可能有辨識誤差，再根據內容回答。"
             )
-            reply = bot_service.handle_user_message(line_user_id=line_user_id, text=prompt)
+            reply = bot_service.handle_user_message(
+                line_user_id=line_user_id,
+                text=prompt,
+                schedule_background_task=schedule_background_task,
+            )
             reply_text(reply_token, reply)
 
     if not getattr(settings, "file_parser_enabled", True):
@@ -252,7 +272,11 @@ def handle_webhook(body: str, signature: str, bot_service: BotService) -> None:
             f"{extracted_text}\n\n"
             "請先簡短說明你是根據抽取內容回答，再提供重點整理與建議。"
         )
-        reply = bot_service.handle_user_message(line_user_id=line_user_id, text=prompt)
+        reply = bot_service.handle_user_message(
+            line_user_id=line_user_id,
+            text=prompt,
+            schedule_background_task=schedule_background_task,
+        )
         reply_text(reply_token, reply)
 
 

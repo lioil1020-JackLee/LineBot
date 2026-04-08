@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 from uuid import uuid4
 
@@ -69,6 +70,12 @@ _MEMORY_SUMMARY_PROMPT = (
 )
 
 _PERSONA_PROMPT_HEADER = "\n\n[角色設定]\n"
+_ROLEPLAY_PRIORITY_PROMPT = (
+    "\n\n[角色扮演模式]\n"
+    "- 若已提供 [角色設定]，請優先遵從角色設定的語氣、措辭、互動方式與陪伴感。\n"
+    "- 保留基本安全、誠實與不捏造原則，但不要反覆強調自己只是一般助理。\n"
+    "- 回覆時請自然地以角色口吻回答，不要額外解釋你正在扮演角色。\n"
+)
 
 # agent_loop 在 linebot_app package 層級
 try:
@@ -104,6 +111,11 @@ class BotService:
         factcheck_service: FactCheckService | None = None,
         external_llm_service: ExternalLLMService | None = None,
         persona_prompt: str = "",
+        roleplay_priority_mode: bool = False,
+        response_guard_skip_when_persona: bool = True,
+        agent_fast_mode: bool = True,
+        agent_auto_search: bool = False,
+        agent_max_tool_rounds: int = 2,
     ) -> None:
         self.session_service = session_service
         self.message_repository = message_repository
@@ -128,6 +140,11 @@ class BotService:
         self.external_llm_service = external_llm_service
         self.agent_enabled: bool = True
         self.persona_prompt = persona_prompt.strip()
+        self.roleplay_priority_mode = roleplay_priority_mode
+        self.response_guard_skip_when_persona = response_guard_skip_when_persona
+        self.agent_fast_mode = agent_fast_mode
+        self.agent_auto_search = agent_auto_search
+        self.agent_max_tool_rounds = max(0, agent_max_tool_rounds)
 
     def set_persona_prompt(self, prompt: str) -> str:
         self.persona_prompt = prompt.strip()
@@ -136,6 +153,13 @@ class BotService:
     def _looks_like_coding_request(self, text: str) -> bool:
         normalized = re.sub(r"\s+", "", text.lower())
         return any(hint.replace(" ", "") in normalized for hint in _CODING_HINTS)
+
+    def _should_block_coding_request(self, text: str) -> bool:
+        return (
+            (not self.coding_assistance_enabled)
+            and (not self.persona_prompt)
+            and self._looks_like_coding_request(text)
+        )
 
     def _build_memory_summary(self, *, existing_summary: str, dialog_text: str) -> str:
         prompt = (
@@ -206,6 +230,73 @@ class BotService:
         kept.reverse()
         return kept
 
+    def _build_system_prompt(self, *, session_id: int, incoming_text: str) -> tuple[str, list[str]]:
+        source_markers: list[str] = []
+        if self.persona_prompt and self.roleplay_priority_mode:
+            system_prompt = (
+                "你是 LINE 對話助理，請使用繁體中文回答。"
+                "若有角色設定，請以角色口吻自然互動，同時保持誠實、清楚與有邊界。"
+            )
+        else:
+            system_prompt = self.prompt_service.get_active_prompt()
+
+        system_prompt += _RUNTIME_CAPABILITY_PROMPT
+        if self.persona_prompt:
+            system_prompt += _PERSONA_PROMPT_HEADER + self.persona_prompt
+            if self.roleplay_priority_mode:
+                system_prompt += _ROLEPLAY_PRIORITY_PROMPT
+
+        if self.session_memory_enabled and self.session_memory_repository is not None:
+            memory = self.session_memory_repository.get(session_id)
+            if memory is not None and memory.summary.strip():
+                system_prompt += "\n\n[對話長期記憶摘要]\n" + memory.summary.strip()
+
+        if self.session_task_repository is not None:
+            open_tasks = self.session_task_repository.get_by_session(
+                session_id=session_id,
+                status="open",
+            )
+            if open_tasks:
+                task_block = "\n".join(f"- {item.task_text}" for item in open_tasks[:10])
+                system_prompt += f"\n\n[使用者待辦事項]\n{task_block}"
+
+        if self.rag_enabled and self.rag_service is not None:
+            references = self.rag_service.search(query=incoming_text, top_k=self.rag_top_k)
+            if references:
+                reference_block = "\n\n".join(
+                    (
+                        f"- [{Path(item.source_path).name}#{item.chunk_index}]"
+                        "(信心:"
+                        f"{self.source_scoring_service.confidence_label(item.score)}) "
+                        f"{item.content}"
+                    )
+                    for item in references
+                )
+                source_markers = [
+                    (
+                        f"{Path(item.source_path).name}#{item.chunk_index}"
+                        f"(信心:{self.source_scoring_service.confidence_label(item.score)})"
+                    )
+                    for item in references
+                ]
+                system_prompt += (
+                    "\n\n以下為可參考的本地知識庫內容，請優先依此回答，"
+                    "若內容不足請明確說明限制：\n"
+                    f"{reference_block}"
+                )
+
+        return system_prompt, source_markers
+
+    def _should_run_guard(self, *, incoming_text: str, draft_answer: str) -> bool:
+        if self.response_guard_service is None:
+            return False
+        if self.response_guard_skip_when_persona and self.persona_prompt:
+            return False
+        return self.response_guard_service.should_review(
+            question=incoming_text,
+            draft_answer=draft_answer,
+        )
+
     def _handle_task_command(self, *, session_id: int, text: str) -> str | None:
         if self.session_task_repository is None or self.task_memory_service is None:
             return None
@@ -241,12 +332,18 @@ class BotService:
 
         return None
 
-    def handle_user_message(self, *, line_user_id: str, text: str) -> str:
+    def handle_user_message(
+        self,
+        *,
+        line_user_id: str,
+        text: str,
+        schedule_background_task: Callable[..., object] | None = None,
+    ) -> str:
         incoming_text = text.strip()
         if not incoming_text:
             return "請輸入文字訊息，我才能協助你。"
 
-        if not self.coding_assistance_enabled and self._looks_like_coding_request(incoming_text):
+        if self._should_block_coding_request(incoming_text):
             return (
                 "我目前不提供程式碼撰寫、修改或除錯服務。"
                 "若你願意，我可以改用白話方式說明觀念、學習路線或幫你整理需求規格。"
@@ -294,52 +391,10 @@ class BotService:
         ]
         conversation.append({"role": "user", "content": incoming_text})
         conversation = self._truncate_conversation(conversation)
-        system_prompt = self.prompt_service.get_active_prompt() + _RUNTIME_CAPABILITY_PROMPT
-        if self.persona_prompt:
-            system_prompt += _PERSONA_PROMPT_HEADER + self.persona_prompt
-        source_markers: list[str] = []
-
-        if self.session_memory_enabled and self.session_memory_repository is not None:
-            memory = self.session_memory_repository.get(session.id)
-            if memory is not None and memory.summary.strip():
-                system_prompt += (
-                    "\n\n[對話長期記憶摘要]\n"
-                    f"{memory.summary.strip()}"
-                )
-
-        if self.session_task_repository is not None:
-            open_tasks = self.session_task_repository.get_by_session(
-                session_id=session.id,
-                status="open",
-            )
-            if open_tasks:
-                task_block = "\n".join(f"- {item.task_text}" for item in open_tasks[:10])
-                system_prompt += f"\n\n[使用者待辦事項]\n{task_block}"
-
-        if self.rag_enabled and self.rag_service is not None:
-            references = self.rag_service.search(query=incoming_text, top_k=self.rag_top_k)
-            if references:
-                reference_block = "\n\n".join(
-                    (
-                        f"- [{Path(item.source_path).name}#{item.chunk_index}]"
-                        "(信心:"
-                        f"{self.source_scoring_service.confidence_label(item.score)}) "
-                        f"{item.content}"
-                    )
-                    for item in references
-                )
-                source_markers = [
-                    (
-                        f"{Path(item.source_path).name}#{item.chunk_index}"
-                        f"(信心:{self.source_scoring_service.confidence_label(item.score)})"
-                    )
-                    for item in references
-                ]
-                system_prompt += (
-                    "\n\n以下為可參考的本地知識庫內容，請優先依此回答，"
-                    "若內容不足請明確說明限制：\n"
-                    f"{reference_block}"
-                )
+        system_prompt, source_markers = self._build_system_prompt(
+            session_id=session.id,
+            incoming_text=incoming_text,
+        )
 
         try:
             if self.agent_enabled and _AGENT_LOOP_AVAILABLE:
@@ -347,6 +402,9 @@ class BotService:
                     llm_service=self.llm_service,
                     system_prompt=system_prompt,
                     conversation=conversation,
+                    fast_mode=self.agent_fast_mode,
+                    auto_search_enabled=self.agent_auto_search,
+                    max_tool_rounds=self.agent_max_tool_rounds,
                 )
                 reply_text = loop_result.final_answer
                 if loop_result.tool_steps:
@@ -395,7 +453,7 @@ class BotService:
                         total_tokens=None,
                     )
 
-            if self.response_guard_service is not None:
+            if self._should_run_guard(incoming_text=incoming_text, draft_answer=reply.text):
                 guard_result = self.response_guard_service.review(
                     question=incoming_text,
                     draft_answer=reply.text,
@@ -475,7 +533,10 @@ class BotService:
             error_message=None,
         )
         self.session_service.mark_activity(session.id)
-        self._try_update_session_memory(session_id=session.id)
+        if schedule_background_task is not None:
+            schedule_background_task(self._try_update_session_memory, session_id=session.id)
+        else:
+            self._try_update_session_memory(session_id=session.id)
         if self.session_task_repository is not None and self.task_memory_service is not None:
             for task in self.task_memory_service.extract_tasks(incoming_text):
                 self.session_task_repository.add_task(session_id=session.id, task_text=task)

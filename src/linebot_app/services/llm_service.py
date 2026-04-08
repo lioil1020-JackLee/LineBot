@@ -21,6 +21,13 @@ class LLMServiceError(Exception):
     pass
 
 
+def _truncate_error_text(text: str, limit: int = 240) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3] + "..."
+
+
 @dataclass(frozen=True)
 class LLMReply:
     text: str
@@ -128,44 +135,74 @@ class LLMService:
         print(f"❌ LM Studio 在 {max_wait_seconds}s 內未啟動")
         return False
 
-    def generate_reply(self, *, system_prompt: str, conversation: list[dict[str, str]]) -> LLMReply:
+    def generate_reply(
+        self,
+        *,
+        system_prompt: str,
+        conversation: list[dict[str, str]],
+        timeout_seconds: int | None = None,
+        max_tokens: int | None = None,
+    ) -> LLMReply:
         messages = [{"role": "system", "content": system_prompt}, *conversation]
         payload = {
             "model": self.chat_model,
             "messages": messages,
             "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens or self.max_tokens,
         }
 
+        effective_timeout = timeout_seconds or self.timeout_seconds
         started = perf_counter()
         try:
-            with httpx.Client(timeout=self.timeout_seconds) as client:
+            with httpx.Client(timeout=effective_timeout) as client:
                 response = client.post(f"{self.base_url}/chat/completions", json=payload)
         except httpx.TimeoutException as exc:
-            raise LMStudioTimeoutError("LM Studio request timeout") from exc
+            raise LMStudioTimeoutError(
+                f"LM Studio request timeout after {effective_timeout}s"
+            ) from exc
         except httpx.HTTPError as exc:
             raise LMStudioUnavailableError("LM Studio is unavailable") from exc
 
         latency_ms = int((perf_counter() - started) * 1000)
 
         if response.status_code >= 500:
-            raise LLMServiceError(f"LM Studio server error: {response.status_code}")
+            detail = _truncate_error_text(getattr(response, "text", ""))
+            raise LLMServiceError(
+                "LM Studio server error: "
+                f"{response.status_code}; model={self.chat_model}; body={detail}"
+            )
         if response.status_code >= 400:
-            raise LLMServiceError(f"LM Studio request failed: {response.status_code}")
+            detail = _truncate_error_text(getattr(response, "text", ""))
+            raise LLMServiceError(
+                "LM Studio request failed: "
+                f"{response.status_code}; model={self.chat_model}; body={detail}"
+            )
 
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise LLMServiceError("LM Studio returned invalid JSON") from exc
         choices = data.get("choices", [])
         if not choices:
-            raise LLMServiceError("LM Studio returned no choices")
+            raise LLMServiceError(
+                f"LM Studio returned no choices; model={data.get('model') or self.chat_model}"
+            )
 
         message = choices[0].get("message", {})
         text = (message.get("content") or "").strip()
         if not text:
-            retry_text = self._retry_finalize_answer(conversation=conversation)
+            retry_text = self._retry_finalize_answer(
+                conversation=conversation,
+                timeout_seconds=effective_timeout,
+                max_tokens=max_tokens or self.max_tokens,
+            )
             if retry_text:
                 text = retry_text
             else:
-                raise LLMServiceError("LM Studio returned empty content")
+                raise LLMServiceError(
+                    "LM Studio returned empty content; "
+                    f"model={data.get('model') or self.chat_model}"
+                )
 
         usage = data.get("usage", {})
         return LLMReply(
@@ -177,7 +214,13 @@ class LLMService:
             total_tokens=usage.get("total_tokens"),
         )
 
-    def _retry_finalize_answer(self, *, conversation: list[dict[str, str]]) -> str | None:
+    def _retry_finalize_answer(
+        self,
+        *,
+        conversation: list[dict[str, str]],
+        timeout_seconds: int,
+        max_tokens: int,
+    ) -> str | None:
         """Handle occasional empty content responses by forcing a concise final answer once."""
         recovery_messages = [
             {
@@ -193,10 +236,10 @@ class LLMService:
             "model": self.chat_model,
             "messages": recovery_messages,
             "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens,
         }
         try:
-            with httpx.Client(timeout=self.timeout_seconds) as client:
+            with httpx.Client(timeout=timeout_seconds) as client:
                 response = client.post(f"{self.base_url}/chat/completions", json=payload)
         except httpx.HTTPError:
             return None

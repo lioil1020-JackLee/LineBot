@@ -1,15 +1,8 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-from linebot_app.agent_loop import (
-    AgentLoopResult,
-    _parse_tool_call,
-    _run_tool,
-    run_agent_loop,
-)
-
+from linebot_app.agent_loop import _parse_tool_call, _run_tool, run_agent_loop
 
 # ---------------------------------------------------------------------------
 # _parse_tool_call
@@ -46,8 +39,8 @@ def test_parse_tool_call_invalid_json():
 # ---------------------------------------------------------------------------
 
 def test_run_tool_web_search(monkeypatch):
-    from linebot_app.tools.web_search import SearchResult
     import linebot_app.agent_loop as al
+    from linebot_app.tools.web_search import SearchResult
 
     fake_results = [SearchResult(title="台灣新聞", url="https://news.tw", snippet="今天台灣很熱")]
     monkeypatch.setattr(al, "_run_web_search", lambda args: al.format_search_results(fake_results)
@@ -174,6 +167,8 @@ def test_run_agent_loop_auto_search_when_uncertain(monkeypatch):
         llm_service=llm,
         system_prompt="你是助理",
         conversation=[{"role": "user", "content": "量子糾纏是什麼？"}],
+        fast_mode=False,
+        auto_search_enabled=True,
     )
     assert "我查到資料了" in result.final_answer
     assert len(result.tool_steps) == 1
@@ -190,6 +185,26 @@ def test_run_agent_loop_uncertain_without_user_query(monkeypatch):
         llm_service=llm,
         system_prompt="你是助理",
         conversation=[{"role": "assistant", "content": "前文"}],
+        fast_mode=False,
+        auto_search_enabled=True,
     )
+    assert result.final_answer == "我不確定這個答案。"
+    assert result.tool_steps == []
+
+
+def test_run_agent_loop_fast_mode_returns_without_auto_search(monkeypatch):
+    monkeypatch.setattr(
+        "linebot_app.agent_loop._run_tool",
+        lambda tool, args: "不應該被呼叫",
+    )
+    llm = _make_llm(["我不確定這個答案。"])
+    result = run_agent_loop(
+        llm_service=llm,
+        system_prompt="你是助理",
+        conversation=[{"role": "user", "content": "問題"}],
+        fast_mode=True,
+        auto_search_enabled=True,
+    )
+
     assert result.final_answer == "我不確定這個答案。"
     assert result.tool_steps == []

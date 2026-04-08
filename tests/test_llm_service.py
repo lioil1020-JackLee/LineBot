@@ -15,6 +15,7 @@ class _FakeResponse:
     def __init__(self, status_code: int, payload: dict[str, object]) -> None:
         self.status_code = status_code
         self._payload = payload
+        self.text = str(payload)
 
     def json(self) -> dict[str, object]:
         return self._payload
@@ -134,6 +135,35 @@ def test_generate_reply_no_choices(monkeypatch: pytest.MonkeyPatch) -> None:
             system_prompt="test",
             conversation=[{"role": "user", "content": "hi"}],
         )
+
+
+def test_generate_reply_http_error_includes_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = LLMService(
+        base_url="http://127.0.0.1:1234/v1",
+        chat_model="chat-model",
+        embed_model="embed-model",
+        timeout_seconds=10,
+        max_tokens=256,
+        temperature=0.2,
+    )
+    fake = _FakeClient(
+        response_map={
+            (
+                "POST",
+                "http://127.0.0.1:1234/v1/chat/completions",
+            ): _FakeResponse(400, {"error": "unknown model"})
+        }
+    )
+    monkeypatch.setattr(httpx, "Client", lambda timeout: fake)
+
+    with pytest.raises(LLMServiceError) as exc_info:
+        service.generate_reply(
+            system_prompt="test",
+            conversation=[{"role": "user", "content": "hi"}],
+        )
+
+    assert "chat-model" in str(exc_info.value)
+    assert "400" in str(exc_info.value)
 
 
 def test_generate_reply_empty_content_retry_success(monkeypatch: pytest.MonkeyPatch) -> None:
