@@ -1,0 +1,8 @@
+gov.tw
+cwa.gov.tw
+twse.com.tw
+yahoo.com
+reuters.com
+bloomberg.com
+bbc.com
+cna.com.tw

@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from linebot_app.config import get_settings
-from linebot_app.db import init_db
+from linebot_app.cli import init_db_main
 
 
 def main() -> None:
-    settings = get_settings()
-    init_db(settings.sqlite_path)
-    print(f"Database initialized at {settings.sqlite_path}")
+    init_db_main()
 
 
 if __name__ == "__main__":

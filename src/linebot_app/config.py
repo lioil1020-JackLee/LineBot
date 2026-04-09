@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import sys
@@ -38,20 +39,47 @@ _BASE_DIR = _resolve_runtime_base_dir()
 _ensure_env_file(_BASE_DIR)
 load_dotenv(dotenv_path=_BASE_DIR / ".env")
 
+logger = logging.getLogger(__name__)
+
+_DEPRECATED_ENV_KEYS = (
+    "ROLEPLAY_ENABLED",
+    "ROLEPLAY_PERSONA_PROMPT",
+    "ROLEPLAY_PRIORITY_MODE",
+    "CODING_ASSISTANCE_ENABLED",
+    "RESPONSE_STYLE",
+    "AGENT_FAST_MODE",
+    "AGENT_AUTO_SEARCH",
+    "AGENT_MAX_TOOL_ROUNDS",
+    "EXTERNAL_LLM_FALLBACK_ENABLED",
+    "EXTERNAL_LLM_BASE_URL",
+    "EXTERNAL_LLM_API_KEY",
+    "EXTERNAL_LLM_MODEL",
+)
+
+_DEFAULT_SYSTEM_PROMPT = (
+    "你是這個 LINE Bot 的助理。"
+    "請優先使用繁體中文，回答要直接、清楚、避免虛構。"
+    "遇到需要即時資訊的問題，應以可查到的資料為準；"
+    "若資料不足，請明確說明限制。"
+)
+
 
 @dataclass(frozen=True)
 class Settings:
     line_channel_access_token: str = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
     line_channel_secret: str = os.getenv("LINE_CHANNEL_SECRET", "")
     line_bot_name: str = os.getenv("LINE_BOT_NAME", "")
-    line_group_require_mention: bool = _is_truthy(os.getenv("LINE_GROUP_REQUIRE_MENTION", "true"))
+    line_group_require_mention: bool = _is_truthy(
+        os.getenv("LINE_GROUP_REQUIRE_MENTION", "true")
+    )
+
     app_host: str = os.getenv("APP_HOST", "0.0.0.0")
     app_port: int = int(os.getenv("APP_PORT", "8000"))
     tray_ui_enabled: bool = _is_truthy(os.getenv("TRAY_UI_ENABLED", "false"))
-    # Frozen executable must disable reload to avoid watchdog respawn loops.
     app_reload: bool = (
         False if getattr(sys, "frozen", False) else _is_truthy(os.getenv("APP_RELOAD", "true"))
     )
+
     lm_studio_base_url: str = os.getenv("LM_STUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
     lm_studio_exe_path: str = os.getenv("LM_STUDIO_EXE_PATH", "")
     lm_studio_chat_model: str = os.getenv("LM_STUDIO_CHAT_MODEL", "qwen/qwen3.5-9b")
@@ -59,19 +87,22 @@ class Settings:
         "LM_STUDIO_EMBED_MODEL",
         "text-embedding-nomic-embed-text-v1.5",
     )
-    lm_studio_timeout_seconds: int = int(os.getenv("LM_STUDIO_TIMEOUT_SECONDS", "90"))
+    lm_studio_timeout_seconds: int = int(os.getenv("LM_STUDIO_TIMEOUT_SECONDS", "20"))
     lm_studio_guard_timeout_seconds: int = int(
-        os.getenv("LM_STUDIO_GUARD_TIMEOUT_SECONDS", "20")
+        os.getenv("LM_STUDIO_GUARD_TIMEOUT_SECONDS", "12")
     )
-    lm_studio_max_tokens: int = int(os.getenv("LM_STUDIO_MAX_TOKENS", "1024"))
-    lm_studio_temperature: float = float(os.getenv("LM_STUDIO_TEMPERATURE", "0.7"))
+    lm_studio_max_tokens: int = int(os.getenv("LM_STUDIO_MAX_TOKENS", "256"))
+    lm_studio_temperature: float = float(os.getenv("LM_STUDIO_TEMPERATURE", "0.3"))
+
     sqlite_path: str = os.getenv("SQLITE_PATH", "data/app.db")
     session_max_turns: int = int(os.getenv("SESSION_MAX_TURNS", "8"))
     session_memory_enabled: bool = _is_truthy(os.getenv("SESSION_MEMORY_ENABLED", "true"))
-    session_memory_trigger_messages: int = int(os.getenv("SESSION_MEMORY_TRIGGER_MESSAGES", "6"))
+    session_memory_trigger_messages: int = int(
+        os.getenv("SESSION_MEMORY_TRIGGER_MESSAGES", "6")
+    )
     session_memory_window_messages: int = int(os.getenv("SESSION_MEMORY_WINDOW_MESSAGES", "12"))
     session_memory_max_chars: int = int(os.getenv("SESSION_MEMORY_MAX_CHARS", "1200"))
-    coding_assistance_enabled: bool = _is_truthy(os.getenv("CODING_ASSISTANCE_ENABLED", "false"))
+
     response_guard_enabled: bool = _is_truthy(os.getenv("RESPONSE_GUARD_ENABLED", "true"))
     response_guard_rewrite_enabled: bool = _is_truthy(
         os.getenv("RESPONSE_GUARD_REWRITE_ENABLED", "true")
@@ -79,54 +110,31 @@ class Settings:
     response_guard_max_input_chars: int = int(
         os.getenv("RESPONSE_GUARD_MAX_INPUT_CHARS", "4000")
     )
-    response_guard_skip_when_persona: bool = _is_truthy(
-        os.getenv("RESPONSE_GUARD_SKIP_WHEN_PERSONA", "true")
-    )
-    roleplay_enabled: bool = _is_truthy(os.getenv("ROLEPLAY_ENABLED", "false"))
-    roleplay_persona_prompt: str = os.getenv("ROLEPLAY_PERSONA_PROMPT", "")
-    roleplay_priority_mode: bool = _is_truthy(os.getenv("ROLEPLAY_PRIORITY_MODE", "true"))
+
     max_context_chars: int = int(os.getenv("MAX_CONTEXT_CHARS", "6000"))
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
+
     rag_enabled: bool = _is_truthy(os.getenv("RAG_ENABLED", "false"))
     knowledge_dir: str = os.getenv("KNOWLEDGE_DIR", "data/knowledge")
-    agent_enabled: bool = _is_truthy(os.getenv("AGENT_ENABLED", "true"))
-    agent_fast_mode: bool = _is_truthy(os.getenv("AGENT_FAST_MODE", "true"))
-    agent_auto_search: bool = _is_truthy(os.getenv("AGENT_AUTO_SEARCH", "false"))
-    agent_max_tool_rounds: int = int(os.getenv("AGENT_MAX_TOOL_ROUNDS", "2"))
     rag_top_k: int = int(os.getenv("RAG_TOP_K", "3"))
     rag_chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "500"))
     rag_chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "100"))
-    web_search_provider: str = os.getenv("WEB_SEARCH_PROVIDER", "duckduckgo")
-    perplexity_base_url: str = os.getenv("PERPLEXITY_BASE_URL", "https://api.perplexity.ai")
-    perplexity_api_key: str = os.getenv("PERPLEXITY_API_KEY", "")
-    perplexity_model: str = os.getenv("PERPLEXITY_MODEL", "sonar")
-    external_llm_fallback_enabled: bool = _is_truthy(
-        os.getenv(
-            "EXTERNAL_LLM_FALLBACK_ENABLED",
-            "false",
-        )
-    )
-    external_llm_base_url: str = os.getenv("EXTERNAL_LLM_BASE_URL", "https://openrouter.ai/api/v1")
-    external_llm_api_key: str = os.getenv("EXTERNAL_LLM_API_KEY", "")
-    external_llm_models: str = os.getenv(
-        "EXTERNAL_LLM_MODELS",
-        "openai/gpt-5-mini,google/gemini-2.5-flash",
-    )
-    external_llm_timeout_seconds: int = int(os.getenv("EXTERNAL_LLM_TIMEOUT_SECONDS", "45"))
+
+    agent_enabled: bool = _is_truthy(os.getenv("AGENT_ENABLED", "true"))
+
+    web_search_backend: str = os.getenv("WEB_SEARCH_BACKEND", "bing").strip().lower()
+    web_search_enabled: bool = _is_truthy(os.getenv("WEB_SEARCH_ENABLED", "true"))
+    web_search_timeout_seconds: int = int(os.getenv("WEB_SEARCH_TIMEOUT_SECONDS", "12"))
+
     image_ocr_enabled: bool = _is_truthy(os.getenv("IMAGE_OCR_ENABLED", "true"))
     file_parser_enabled: bool = _is_truthy(os.getenv("FILE_PARSER_ENABLED", "true"))
-    # 假訊息查證功能
     factcheck_enabled: bool = _is_truthy(os.getenv("FACTCHECK_ENABLED", "true"))
     factcheck_max_search_queries: int = int(os.getenv("FACTCHECK_MAX_SEARCH_QUERIES", "2"))
-    factcheck_max_results_per_query: int = int(os.getenv("FACTCHECK_MAX_RESULTS_PER_QUERY", "4"))
-    system_prompt: str = os.getenv(
-        "SYSTEM_PROMPT",
-        (
-            "你是 LINE 萬事通助理，請使用繁體中文回答，"
-            "擅長日常知識、學習、工作、生活建議與資訊整理。"
-            "回覆需清楚、實用、結構化；若資訊不足，請誠實說明限制。"
-        ),
+    factcheck_max_results_per_query: int = int(
+        os.getenv("FACTCHECK_MAX_RESULTS_PER_QUERY", "4")
     )
+
+    system_prompt: str = os.getenv("SYSTEM_PROMPT", _DEFAULT_SYSTEM_PROMPT)
 
     @property
     def line_ready(self) -> bool:
@@ -135,4 +143,7 @@ class Settings:
 
 @lru_cache
 def get_settings() -> Settings:
+    deprecated_keys = [key for key in _DEPRECATED_ENV_KEYS if os.getenv(key) is not None]
+    if deprecated_keys:
+        logger.warning("Ignored deprecated .env keys: %s", ", ".join(sorted(deprecated_keys)))
     return Settings()

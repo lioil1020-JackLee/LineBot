@@ -86,29 +86,20 @@ class LLMService:
             return False
 
     def try_start_lm_studio(self, max_wait_seconds: int = 30) -> bool:
-        """嘗試啟動 LM Studio，若已執行或無 exe_path 則返回 True。
-
-        Args:
-            max_wait_seconds: 最大等待秒數
-
-        Returns:
-            True 若成功連接或啟動，False 若失敗
-        """
+        """Try to launch LM Studio when an executable path is configured."""
         if not self.exe_path:
             return self.is_available()
 
         exe_path = Path(self.exe_path)
         if not exe_path.exists():
-            print(f"⚠️  LM Studio exe 不存在: {self.exe_path}")
+            print(f"LM Studio executable not found: {self.exe_path}")
             return self.is_available()
 
-        # 檢查是否已可連接
         if self.is_available():
-            print("✓ LM Studio 已在執行")
+            print("LM Studio is already running.")
             return True
 
-        # 嘗試啟動
-        print(f"🚀 啟動 LM Studio: {exe_path}")
+        print(f"Starting LM Studio: {exe_path}")
         try:
             self._lm_studio_process = subprocess.Popen(
                 [str(exe_path)],
@@ -120,19 +111,19 @@ class LLMService:
                     else 0
                 ),
             )
-        except Exception as e:
-            print(f"❌ 啟動 LM Studio 失敗: {e}")
+        except Exception as exc:
+            print(f"Failed to start LM Studio: {exc}")
             return False
 
-        # 等待啟動完成
         start_time = time.time()
         while time.time() - start_time < max_wait_seconds:
             if self.is_available():
-                print(f"✓ LM Studio 啟動成功 ({time.time() - start_time:.1f}s)")
+                elapsed = time.time() - start_time
+                print(f"LM Studio became available after {elapsed:.1f}s")
                 return True
             time.sleep(1)
 
-        print(f"❌ LM Studio 在 {max_wait_seconds}s 內未啟動")
+        print(f"LM Studio did not become available within {max_wait_seconds}s")
         return False
 
     def generate_reply(
@@ -226,8 +217,8 @@ class LLMService:
             {
                 "role": "system",
                 "content": (
-                    "你是助理。請直接輸出最終回答，不要輸出思考過程、分析步驟、"
-                    "tool_call 或其他中介內容。"
+                    "You must now produce the final answer directly. "
+                    "Do not emit tool calls, tags, or extra metadata."
                 ),
             },
             *conversation,

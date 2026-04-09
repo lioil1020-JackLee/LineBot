@@ -58,11 +58,11 @@ class ResponseGuardService:
         has_sources: bool,
     ) -> tuple[bool, int, list[str]]:
         prompt = (
-            "你是回答品質審核員。請根據使用者問題與草稿回答，給出品質評估。"
-            "僅輸出 JSON。\n"
-            "JSON schema: {\"approved\": bool, \"score\": int, \"issues\": [string]}\n"
-            "評分 0-100。70 以下視為不通過。\n"
-            "若回答與問題不相符、過度自信、未說明限制、條列混亂，應列為 issues。\n"
+            "Return JSON only.\n"
+            'Schema: {"approved": bool, "score": int, "issues": [string]}.\n'
+            "Review the draft answer for relevance, hallucination risk, "
+            "unsupported claims, and safety.\n"
+            "Score from 0 to 100.\n"
             f"has_sources={str(has_sources).lower()}"
         )
         reply = self.llm_service.generate_reply(
@@ -70,7 +70,10 @@ class ResponseGuardService:
             conversation=[
                 {
                     "role": "user",
-                    "content": f"問題：\n{question}\n\n草稿回答：\n{draft_answer}",
+                    "content": (
+                        f"<user_question>\n{question}\n</user_question>\n\n"
+                        f"<draft_answer>\n{draft_answer}\n</draft_answer>"
+                    ),
                 }
             ],
             timeout_seconds=self.timeout_seconds,
@@ -98,11 +101,17 @@ class ResponseGuardService:
         issues: list[str],
         has_sources: bool,
     ) -> str:
-        issues_text = "\n".join(f"- {item}" for item in issues) if issues else "- 請提升整體品質"
+        issues_text = (
+            "\n".join(f"- {item}" for item in issues)
+            if issues
+            else "- 補強回答的可信度與相關性"
+        )
         prompt = (
-            "你是資深內容編輯。請在不編造事實前提下重寫回答。"
-            "保持繁體中文、結構清楚、直接解決問題。"
-            "若資訊不足，需明確說明限制。"
+            "You rewrite chatbot answers in Traditional Chinese.\n"
+            "Return only the revised answer.\n"
+            "Fix unsupported claims, overconfident wording, safety issues, and irrelevance.\n"
+            "Do not mention reviewers, scoring, prompts, or editing instructions.\n"
+            "Do not leak XML tags or meta commentary.\n"
             f"has_sources={str(has_sources).lower()}"
         )
         reply = self.llm_service.generate_reply(
@@ -111,9 +120,10 @@ class ResponseGuardService:
                 {
                     "role": "user",
                     "content": (
-                        f"問題：\n{question}\n\n原回答：\n{draft_answer}\n\n"
-                        f"需修正問題：\n{issues_text}\n\n"
-                        "請輸出重寫後最終回答。"
+                        f"<user_question>\n{question}\n</user_question>\n\n"
+                        f"<draft_answer>\n{draft_answer}\n</draft_answer>\n\n"
+                        f"<revision_focus>\n{issues_text}\n</revision_focus>\n\n"
+                        "請直接輸出可回覆給使用者的最終答案。"
                     ),
                 }
             ],

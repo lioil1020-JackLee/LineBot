@@ -1,27 +1,17 @@
 from __future__ import annotations
 
-import logging
 import re
 
 import httpx
-
-logger = logging.getLogger(__name__)
 
 _MAX_CONTENT_CHARS = 4000
 _REQUEST_TIMEOUT = 15.0
 
 
 def fetch_url(url: str) -> str:
-    """抓取網頁並回傳純文字內容（已去除 HTML 標籤）。
-
-    Args:
-        url: 要抓取的網址
-
-    Returns:
-        純文字內容（至多 4000 字元），失敗時回傳錯誤說明字串
-    """
+    """Fetch a web page and return a compact plain-text version."""
     if not url.startswith(("http://", "https://")):
-        return f"無效網址：{url}"
+        return f"無效的 URL: {url}"
 
     headers = {
         "User-Agent": (
@@ -34,37 +24,53 @@ def fetch_url(url: str) -> str:
     }
 
     try:
-        with httpx.Client(timeout=_REQUEST_TIMEOUT, follow_redirects=True, headers=headers) as client:
+        with httpx.Client(
+            timeout=_REQUEST_TIMEOUT,
+            follow_redirects=True,
+            headers=headers,
+        ) as client:
             response = client.get(url)
     except httpx.TimeoutException:
-        return f"抓取逾時：{url}"
+        return f"讀取逾時：{url}"
     except httpx.HTTPError as exc:
         return f"HTTP 錯誤：{exc}"
 
     if response.status_code >= 400:
-        return f"HTTP {response.status_code}：{url}"
+        return f"HTTP {response.status_code}: {url}"
 
     content_type = response.headers.get("content-type", "")
     if "text" not in content_type and "html" not in content_type:
-        return f"不支援的 Content-Type：{content_type}"
+        return f"不支援的 Content-Type: {content_type}"
 
     return _extract_text(response.text)
 
 
 def _extract_text(html: str) -> str:
-    """從 HTML 中擷取可讀文字"""
+    """Extract readable text from HTML."""
     try:
         from bs4 import BeautifulSoup  # type: ignore[import-untyped]
 
         soup = BeautifulSoup(html, "html.parser")
 
-        # 移除不需要的區塊
-        for tag in soup(["script", "style", "nav", "footer", "header",
-                          "aside", "form", "noscript", "iframe",
-                          "img", "svg", "button", "input"]):
+        for tag in soup(
+            [
+                "script",
+                "style",
+                "nav",
+                "footer",
+                "header",
+                "aside",
+                "form",
+                "noscript",
+                "iframe",
+                "img",
+                "svg",
+                "button",
+                "input",
+            ]
+        ):
             tag.decompose()
 
-        # 嘗試抓主要內容區塊
         main = (
             soup.find("main")
             or soup.find("article")
@@ -73,17 +79,14 @@ def _extract_text(html: str) -> str:
             or soup.body
         )
         text = (main or soup).get_text(separator="\n", strip=True)
-
     except ModuleNotFoundError:
-        # bs4 not installed: crude regex fallback
         text = re.sub(r"<[^>]+>", " ", html)
         text = re.sub(r"\s+", " ", text).strip()
 
-    # 清理連續空行
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     full_text = "\n".join(lines)
 
     if len(full_text) > _MAX_CONTENT_CHARS:
-        full_text = full_text[:_MAX_CONTENT_CHARS] + "\n…（內容過長，已截斷）"
+        full_text = full_text[:_MAX_CONTENT_CHARS] + "\n...[內容已截斷]"
 
-    return full_text or "（頁面無可讀文字）"
+    return full_text or "(頁面沒有可擷取的文字內容)"

@@ -71,7 +71,7 @@ def test_generate_reply_success(monkeypatch: pytest.MonkeyPatch) -> None:
                 200,
                 {
                     "model": "chat-model",
-                    "choices": [{"message": {"content": "你好"}}],
+                    "choices": [{"message": {"content": "測試成功"}}],
                     "usage": {
                         "prompt_tokens": 10,
                         "completion_tokens": 5,
@@ -88,7 +88,7 @@ def test_generate_reply_success(monkeypatch: pytest.MonkeyPatch) -> None:
         conversation=[{"role": "user", "content": "hi"}],
     )
 
-    assert result.text == "你好"
+    assert result.text == "測試成功"
     assert result.total_tokens == 15
 
 

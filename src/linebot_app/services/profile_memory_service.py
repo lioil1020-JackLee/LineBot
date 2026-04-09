@@ -10,11 +10,11 @@ class ProfileMemoryService:
 
         for line in lines:
             lower = line.lower()
-            if "偏好" in line or "prefer" in lower:
+            if any(token in lower for token in ("偏好", "喜歡", "prefer", "preference")):
                 preferences.append(line)
-            elif "目標" in line or "goal" in lower or "想" in line:
+            elif any(token in lower for token in ("目標", "想要", "goal")):
                 goals.append(line)
-            elif "限制" in line or "避免" in line or "不能" in line:
+            elif any(token in lower for token in ("限制", "不能", "避免", "constraint")):
                 constraints.append(line)
 
         return {

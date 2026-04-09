@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.14.3",
-    "ddgs>=9.13.0",
     "openpyxl>=3.1.5",
     "fastapi>=0.135.3",
     "httpx>=0.28.1",
@@ -25,6 +24,12 @@ dependencies = [
 linebot = "linebot_app:main"
 build-onedir = "linebot_app.build_tools:build_onedir"
 build-onefile = "linebot_app.build_tools:build_onefile"
+init-db = "linebot_app.cli:init_db_main"
+ingest-knowledge = "linebot_app.cli:ingest_knowledge_main"
+health-report = "linebot_app.cli:health_report_main"
+export-metrics-report = "linebot_app.cli:export_metrics_report_main"
+cleanup-runtime = "linebot_app.cli:cleanup_runtime_main"
+run-eval = "linebot_app.cli:run_eval_main"
 
 [build-system]
 requires = ["uv_build>=0.11.2,<0.12.0"]

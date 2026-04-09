@@ -17,7 +17,12 @@ class SessionTaskRepository:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
 
-    def get_by_session(self, *, session_id: int, status: str | None = None) -> list[SessionTaskRecord]:
+    def get_by_session(
+        self,
+        *,
+        session_id: int,
+        status: str | None = None,
+    ) -> list[SessionTaskRecord]:
         with get_connection(self.db_path) as connection:
             if status is None:
                 rows = connection.execute(

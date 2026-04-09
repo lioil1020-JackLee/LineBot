@@ -32,6 +32,15 @@ logger = logging.getLogger(__name__)
 image_ocr_service = ImageOCRService()
 document_parser_service = DocumentParserService()
 
+_IMAGE_ID_MISSING_MESSAGE = "無法取得圖片訊息 ID，請再試一次。"
+_IMAGE_DOWNLOAD_FAILED_MESSAGE = "無法下載圖片內容，請稍後再試。"
+_IMAGE_OCR_DEPENDENCY_MESSAGE = "目前未安裝圖片 OCR 所需套件，暫時無法辨識圖片文字。"
+_IMAGE_OCR_FAILED_MESSAGE = "圖片辨識失敗，請稍後再試，或改傳更清晰的圖片。"
+_IMAGE_EMPTY_TEXT_MESSAGE = "這張圖片沒有辨識到可用文字，可以改傳更清晰的圖片或直接描述想問的內容。"
+
+_FILE_ID_MISSING_MESSAGE = "無法取得檔案訊息 ID，請再試一次。"
+_FILE_DOWNLOAD_FAILED_MESSAGE = "無法下載檔案內容，請稍後再試。"
+
 
 def reply_text(reply_token: str, text: str) -> None:
     configuration = Configuration(access_token=settings.line_channel_access_token)
@@ -45,7 +54,6 @@ def reply_text(reply_token: str, text: str) -> None:
                 )
             )
     except Exception:
-        # LINE API 失敗時僅記錄錯誤，避免讓 webhook 直接回 500 造成重試風暴。
         logger.exception("Failed to reply LINE message")
 
 
@@ -75,8 +83,7 @@ def _iter_file_events(events: Iterable[object]) -> Iterable[MessageEvent]:
 
 def _is_group_or_room_event(event: MessageEvent) -> bool:
     source = getattr(event, "source", None)
-    source_type = getattr(source, "type", "")
-    return source_type in {"group", "room"}
+    return getattr(source, "type", "") in {"group", "room"}
 
 
 def _extract_mentions(event: MessageEvent) -> list[object]:
@@ -96,13 +103,20 @@ def _is_self_mention(mentionee: object) -> bool:
     return bool(getattr(mentionee, "is_self", False))
 
 
+def _get_bot_name_aliases() -> tuple[str, ...]:
+    configured_name = (settings.line_bot_name or "").strip()
+    if configured_name:
+        return (configured_name,)
+    return ()
+
+
 def _strip_named_call_prefix(text: str) -> str:
-    bot_name = (settings.line_bot_name or "").strip()
-    if not bot_name:
+    aliases = _get_bot_name_aliases()
+    if not aliases:
         return text.strip()
 
-    # Support both half-width @ and full-width ＠ prefixes in group chats.
-    pattern = rf"^\s*[@＠]{re.escape(bot_name)}[\s,:，：-]*"
+    joined = "|".join(re.escape(name) for name in aliases)
+    pattern = rf"^\s*@?(?:{joined})(?:[\s,，:：-]+)?"
     return re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
 
 
@@ -113,19 +127,15 @@ def _should_reply(event: MessageEvent) -> bool:
     if not getattr(settings, "line_group_require_mention", True):
         return True
 
-    # 圖片/檔案訊息通常沒有 @mention，群組內預設仍允許回應。
     if isinstance(getattr(event, "message", None), (ImageMessageContent, FileMessageContent)):
         return True
 
     mentionees = _extract_mentions(event)
-    if any(_is_self_mention(mentionee) for mentionee in mentionees):
+    if any(_is_self_mention(item) for item in mentionees):
+        return True
+    if mentionees:
         return True
 
-    # LINE v3 SDK mention model may only expose type/index/length.
-    if len(mentionees) > 0:
-        return True
-
-    # Fallback: some clients may send plain text like "@lioil_bot ...".
     text = getattr(event.message, "text", "")
     return _strip_named_call_prefix(text) != text.strip()
 
@@ -146,10 +156,45 @@ def _strip_self_mentions_from_text(event: MessageEvent, text: str) -> str:
     if not ranges:
         return _strip_named_call_prefix(text)
 
-    # Reverse order to avoid index shift while slicing.
     for start, end in sorted(ranges, reverse=True):
         text = text[:start] + text[end:]
     return text.strip()
+
+
+def _call_bot_service(
+    *,
+    bot_service: BotService,
+    line_user_id: str,
+    text: str,
+    schedule_background_task: Callable[..., object] | None,
+) -> str:
+    try:
+        return bot_service.handle_user_message(
+            line_user_id=line_user_id,
+            text=text,
+            schedule_background_task=schedule_background_task,
+        )
+    except TypeError:
+        return bot_service.handle_user_message(
+            line_user_id=line_user_id,
+            text=text,
+        )
+
+
+def _build_image_prompt(ocr_text: str) -> str:
+    return (
+        "請協助閱讀以下從圖片辨識出的文字，整理重點並直接回答使用者可能想知道的內容。\n\n"
+        f"{ocr_text}\n\n"
+        "若文字有明顯辨識錯誤，可以依上下文合理修正，但不要捏造原文沒有的資訊。"
+    )
+
+
+def _build_file_prompt(*, file_name: str, extracted_text: str) -> str:
+    return (
+        f"請協助閱讀以下檔案內容，檔名為 {file_name}。\n\n"
+        f"{extracted_text}\n\n"
+        "請先整理重點，再直接回答使用者可能最在意的內容；如果資訊不足，請明確說明。"
+    )
 
 
 def handle_webhook(
@@ -165,18 +210,19 @@ def handle_webhook(
 
     for event in _iter_text_events(events):
         reply_token = getattr(event, "reply_token", "")
-        if not reply_token:
+        if not reply_token or not _should_reply(event):
             continue
 
-        if not _should_reply(event):
-            continue
-
-        incoming_text = getattr(event.message, "text", "")
-        incoming_text = _strip_self_mentions_from_text(event, incoming_text)
+        incoming_text = _strip_self_mentions_from_text(
+            event,
+            getattr(event.message, "text", ""),
+        )
         if not incoming_text:
             continue
+
         line_user_id = _extract_line_user_id(event)
-        reply = bot_service.handle_user_message(
+        reply = _call_bot_service(
+            bot_service=bot_service,
             line_user_id=line_user_id,
             text=incoming_text,
             schedule_background_task=schedule_background_task,
@@ -186,46 +232,37 @@ def handle_webhook(
     if getattr(settings, "image_ocr_enabled", True):
         for event in _iter_image_events(events):
             reply_token = getattr(event, "reply_token", "")
-            if not reply_token:
-                continue
-
-            if not _should_reply(event):
+            if not reply_token or not _should_reply(event):
                 continue
 
             line_user_id = _extract_line_user_id(event)
             message_id = str(getattr(event.message, "id", "") or "")
             if not message_id:
-                reply_text(reply_token, "目前無法讀取這張圖片，請稍後再試。")
+                reply_text(reply_token, _IMAGE_ID_MISSING_MESSAGE)
                 continue
 
             image_bytes = _download_line_message_content(message_id)
             if not image_bytes:
-                reply_text(reply_token, "目前無法下載這張圖片，請稍後再試。")
+                reply_text(reply_token, _IMAGE_DOWNLOAD_FAILED_MESSAGE)
                 continue
 
             try:
                 ocr_text = image_ocr_service.extract_text(image_bytes)
             except ModuleNotFoundError:
-                reply_text(reply_token, "目前尚未安裝圖片 OCR 套件，暫時無法解析圖片文字。")
+                reply_text(reply_token, _IMAGE_OCR_DEPENDENCY_MESSAGE)
                 continue
             except Exception:
                 logger.exception("Failed to OCR image message_id=%s", message_id)
-                reply_text(reply_token, "圖片解析失敗，請改傳更清晰圖片或直接貼上文字。")
+                reply_text(reply_token, _IMAGE_OCR_FAILED_MESSAGE)
                 continue
 
             if not ocr_text.strip():
-                reply_text(
-                    reply_token,
-                    "我有收到圖片，但沒有辨識到可用文字，請改傳清晰截圖或文字內容。",
-                )
+                reply_text(reply_token, _IMAGE_EMPTY_TEXT_MESSAGE)
                 continue
 
-            prompt = (
-                "使用者上傳了一張圖片，以下是我辨識出的文字（可能有 OCR 誤差）：\n"
-                f"{ocr_text}\n\n"
-                "請先簡短提醒可能有辨識誤差，再根據內容回答。"
-            )
-            reply = bot_service.handle_user_message(
+            prompt = _build_image_prompt(ocr_text)
+            reply = _call_bot_service(
+                bot_service=bot_service,
                 line_user_id=line_user_id,
                 text=prompt,
                 schedule_background_task=schedule_background_task,
@@ -237,10 +274,7 @@ def handle_webhook(
 
     for event in _iter_file_events(events):
         reply_token = getattr(event, "reply_token", "")
-        if not reply_token:
-            continue
-
-        if not _should_reply(event):
+        if not reply_token or not _should_reply(event):
             continue
 
         line_user_id = _extract_line_user_id(event)
@@ -248,15 +282,15 @@ def handle_webhook(
         file_name = str(
             getattr(event.message, "file_name", "")
             or getattr(event.message, "fileName", "")
-            or "未命名檔案"
+            or "unnamed-file"
         )
         if not message_id:
-            reply_text(reply_token, "目前無法讀取這份檔案，請稍後再試。")
+            reply_text(reply_token, _FILE_ID_MISSING_MESSAGE)
             continue
 
         file_bytes = _download_line_message_content(message_id)
         if not file_bytes:
-            reply_text(reply_token, "目前無法下載這份檔案，請稍後再試。")
+            reply_text(reply_token, _FILE_DOWNLOAD_FAILED_MESSAGE)
             continue
 
         extracted_text, parse_error = document_parser_service.extract_text(
@@ -267,12 +301,9 @@ def handle_webhook(
             reply_text(reply_token, parse_error)
             continue
 
-        prompt = (
-            f"使用者上傳了一份檔案（{file_name}），以下是抽取到的文字內容：\n"
-            f"{extracted_text}\n\n"
-            "請先簡短說明你是根據抽取內容回答，再提供重點整理與建議。"
-        )
-        reply = bot_service.handle_user_message(
+        prompt = _build_file_prompt(file_name=file_name, extracted_text=extracted_text)
+        reply = _call_bot_service(
+            bot_service=bot_service,
             line_user_id=line_user_id,
             text=prompt,
             schedule_background_task=schedule_background_task,
@@ -292,5 +323,5 @@ def _download_line_message_content(message_id: str) -> bytes | None:
         if isinstance(response, (bytes, bytearray)):
             return bytes(response)
     except Exception:
-        logger.exception("Failed to download LINE image content message_id=%s", message_id)
+        logger.exception("Failed to download LINE message content message_id=%s", message_id)
     return None

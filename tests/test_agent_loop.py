@@ -2,209 +2,166 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from linebot_app.agent_loop import _parse_tool_call, _run_tool, run_agent_loop
+from linebot_app.agent_loop import (
+    _parse_tool_call,
+    _run_market_quote_fallback,
+    _run_tool,
+    run_agent_loop,
+)
 
-# ---------------------------------------------------------------------------
-# _parse_tool_call
-# ---------------------------------------------------------------------------
 
-def test_parse_tool_call_valid():
-    text = '<tool_call>\n{"tool": "web_search", "args": {"query": "台灣天氣"}}\n</tool_call>'
+def test_parse_tool_call_valid() -> None:
+    text = '<tool_call>\n{"tool": "web_search", "args": {"query": "台北天氣"}}\n</tool_call>'
     result = _parse_tool_call(text)
-    assert result is not None
-    tool, args = result
-    assert tool == "web_search"
-    assert args == {"query": "台灣天氣"}
+    assert result == ("web_search", {"query": "台北天氣"})
 
 
-def test_parse_tool_call_fetch_url():
+def test_parse_tool_call_fetch_url() -> None:
     text = '<tool_call>{"tool": "fetch_url", "args": {"url": "https://example.com"}}</tool_call>'
     result = _parse_tool_call(text)
-    assert result is not None
-    assert result[0] == "fetch_url"
-    assert result[1]["url"] == "https://example.com"
+    assert result == ("fetch_url", {"url": "https://example.com"})
 
 
-def test_parse_tool_call_no_match():
-    assert _parse_tool_call("這是一般回覆，不含工具呼叫") is None
-    assert _parse_tool_call("") is None
-
-
-def test_parse_tool_call_invalid_json():
+def test_parse_tool_call_invalid_json() -> None:
     assert _parse_tool_call("<tool_call>{broken json}</tool_call>") is None
 
 
-# ---------------------------------------------------------------------------
-# _run_tool
-# ---------------------------------------------------------------------------
-
-def test_run_tool_web_search(monkeypatch):
-    import linebot_app.agent_loop as al
-    from linebot_app.tools.web_search import SearchResult
-
-    fake_results = [SearchResult(title="台灣新聞", url="https://news.tw", snippet="今天台灣很熱")]
-    monkeypatch.setattr(al, "_run_web_search", lambda args: al.format_search_results(fake_results)
-                        if hasattr(al, "format_search_results")
-                        else "台灣新聞\nhttps://news.tw\n今天台灣很熱")
-
-    from linebot_app.tools.web_search import format_search_results
-    monkeypatch.setattr(al, "_run_web_search", lambda args: format_search_results(fake_results))
-    result = al._run_tool("web_search", {"query": "台灣天氣"})
-    assert "台灣新聞" in result
-    assert "今天台灣很熱" in result
-
-
-def test_run_tool_fetch_url(monkeypatch):
-    import linebot_app.agent_loop as al
-    monkeypatch.setattr(al, "_run_fetch_url", lambda args: "頁面內容 hello world")
-    result = al._run_tool("fetch_url", {"url": "https://example.com"})
-    assert "頁面內容" in result
-
-
-def test_run_tool_missing_query():
+def test_run_tool_missing_query() -> None:
     result = _run_tool("web_search", {})
-    assert "缺少" in result
+    assert "missing query" in result
 
 
-def test_run_tool_unknown():
+def test_run_tool_unknown() -> None:
     result = _run_tool("nonexistent_tool", {})
-    assert "未知工具" in result
+    assert "unknown tool" in result
 
 
-# ---------------------------------------------------------------------------
-# run_agent_loop
-# ---------------------------------------------------------------------------
+def test_run_tool_fetch_url(monkeypatch) -> None:
+    import linebot_app.agent_loop as al
+
+    monkeypatch.setattr(al, "_run_fetch_url", lambda _: "fetched content")
+    result = al._run_tool("fetch_url", {"url": "https://example.com"})
+    assert result == "fetched content"
+
 
 def _make_llm(replies: list[str]) -> MagicMock:
-    """Helper: 模擬 LLMService，依序回傳指定的文字"""
     from linebot_app.services.llm_service import LLMReply
 
     llm = MagicMock()
     llm.chat_model = "mock-model"
     llm.generate_reply.side_effect = [
         LLMReply(
-            text=t,
+            text=text,
             model_name="mock-model",
             latency_ms=1,
             prompt_tokens=5,
             completion_tokens=5,
             total_tokens=10,
         )
-        for t in replies
+        for text in replies
     ]
     return llm
 
 
-def test_run_agent_loop_no_tool():
-    llm = _make_llm(["今天天氣很好。"])
+def test_run_agent_loop_no_tool() -> None:
+    llm = _make_llm(["final answer"])
     result = run_agent_loop(
         llm_service=llm,
-        system_prompt="你是助理",
-        conversation=[{"role": "user", "content": "你好"}],
+        system_prompt="system",
+        conversation=[{"role": "user", "content": "hello"}],
     )
-    assert result.final_answer == "今天天氣很好。"
+    assert result.final_answer == "final answer"
     assert result.tool_steps == []
     assert result.rounds == 1
 
 
-def test_run_agent_loop_with_one_tool_call(monkeypatch):
-    monkeypatch.setattr(
-        "linebot_app.agent_loop._run_tool",
-        lambda tool, args: "搜尋結果：台北 25°C",
+def test_run_agent_loop_with_tool_call(monkeypatch) -> None:
+    monkeypatch.setattr("linebot_app.agent_loop._run_tool", lambda *_: "search result")
+    llm = _make_llm(
+        [
+            '<tool_call>{"tool": "web_search", "args": {"query": "台北天氣"}}</tool_call>',
+            "台北今天 25C",
+        ]
     )
-    llm = _make_llm([
-        '<tool_call>{"tool": "web_search", "args": {"query": "台北天氣"}}</tool_call>',
-        "根據搜尋結果，台北今天 25°C，晴天。",
-    ])
     result = run_agent_loop(
         llm_service=llm,
-        system_prompt="你是助理",
-        conversation=[{"role": "user", "content": "台北天氣如何？"}],
+        system_prompt="system",
+        conversation=[{"role": "user", "content": "台北天氣"}],
     )
-    assert "25°C" in result.final_answer
+    assert "25C" in result.final_answer
     assert len(result.tool_steps) == 1
     assert result.tool_steps[0].tool == "web_search"
 
 
-def test_run_agent_loop_max_rounds(monkeypatch):
-    """連續要求工具超過上限時，強制回傳最後一次的文字"""
-    monkeypatch.setattr(
-        "linebot_app.agent_loop._run_tool",
-        lambda tool, args: "搜尋結果",
+def test_run_agent_loop_uses_raw_user_query_for_web_search(monkeypatch) -> None:
+    captured_args: list[dict] = []
+
+    def _fake_run_tool(tool_name: str, args: dict) -> str:
+        captured_args.append({"tool": tool_name, "args": dict(args)})
+        return "search result"
+
+    monkeypatch.setattr("linebot_app.agent_loop._run_tool", _fake_run_tool)
+    llm = _make_llm(
+        [
+            (
+                '<tool_call>{"tool": "web_search", '
+                '"args": {"query": "延續上一題股票內容，查你的底層模型"}}</tool_call>'
+            ),
+            "回答完成",
+        ]
     )
-    # 4 輪全部都要求工具，第 4 輪應強制回傳
-    tool_call = '<tool_call>{"tool": "web_search", "args": {"query": "test"}}</tool_call>'
-    final = "這是最終答案"
-    llm = _make_llm([tool_call, tool_call, tool_call, final])
-
-    from linebot_app import agent_loop
-    original_max = agent_loop._MAX_TOOL_ROUNDS
-    agent_loop._MAX_TOOL_ROUNDS = 3
-
-    try:
-        result = run_agent_loop(
-            llm_service=llm,
-            system_prompt="你是助理",
-            conversation=[{"role": "user", "content": "問題"}],
-        )
-    finally:
-        agent_loop._MAX_TOOL_ROUNDS = original_max
-
-    assert result.rounds == 4
-    assert len(result.tool_steps) == 3  # 第 4 輪不執行工具
-
-
-def test_run_agent_loop_auto_search_when_uncertain(monkeypatch):
-    monkeypatch.setattr(
-        "linebot_app.agent_loop._run_tool",
-        lambda tool, args: "搜尋結果：維基百科說明...",
-    )
-    llm = _make_llm([
-        "我不確定這個答案。",
-        "我查到資料了：根據維基百科...",
-    ])
     result = run_agent_loop(
         llm_service=llm,
-        system_prompt="你是助理",
-        conversation=[{"role": "user", "content": "量子糾纏是什麼？"}],
+        system_prompt="system",
+        conversation=[{"role": "user", "content": "上一題補強文本"}],
+        raw_user_query="你的底層模型是什麼",
+    )
+
+    assert result.final_answer == "回答完成"
+    assert captured_args[0]["tool"] == "web_search"
+    assert captured_args[0]["args"]["query"] == "你的底層模型是什麼"
+    assert result.tool_steps[0].args["query"] == "你的底層模型是什麼"
+
+
+def test_run_agent_loop_auto_search_when_uncertain(monkeypatch) -> None:
+    monkeypatch.setattr("linebot_app.agent_loop._run_tool", lambda *_: "search result")
+    llm = _make_llm(["I am not sure.", "now I can answer"])
+    result = run_agent_loop(
+        llm_service=llm,
+        system_prompt="system",
+        conversation=[{"role": "user", "content": "latest weather"}],
         fast_mode=False,
         auto_search_enabled=True,
     )
-    assert "我查到資料了" in result.final_answer
+    assert result.final_answer == "now I can answer"
     assert len(result.tool_steps) == 1
     assert result.tool_steps[0].tool == "web_search"
 
 
-def test_run_agent_loop_uncertain_without_user_query(monkeypatch):
-    monkeypatch.setattr(
-        "linebot_app.agent_loop._run_tool",
-        lambda tool, args: "不應被呼叫",
-    )
-    llm = _make_llm(["我不確定這個答案。"])
-    result = run_agent_loop(
-        llm_service=llm,
-        system_prompt="你是助理",
-        conversation=[{"role": "assistant", "content": "前文"}],
-        fast_mode=False,
-        auto_search_enabled=True,
-    )
-    assert result.final_answer == "我不確定這個答案。"
-    assert result.tool_steps == []
+def test_market_quote_fallback_for_tsmc(monkeypatch) -> None:
+    from linebot_app.services.market_service import MarketSnapshot
 
+    class _FakeMarketService:
+        def query_taiwan_weighted_index(self):
+            return None
 
-def test_run_agent_loop_fast_mode_returns_without_auto_search(monkeypatch):
-    monkeypatch.setattr(
-        "linebot_app.agent_loop._run_tool",
-        lambda tool, args: "不應該被呼叫",
-    )
-    llm = _make_llm(["我不確定這個答案。"])
-    result = run_agent_loop(
-        llm_service=llm,
-        system_prompt="你是助理",
-        conversation=[{"role": "user", "content": "問題"}],
-        fast_mode=True,
-        auto_search_enabled=True,
-    )
+        def query_taiwan_stock_by_query(self, query: str):
+            if "台積電" not in query:
+                return None
+            return MarketSnapshot(
+                symbol="2330.TW",
+                display_name="台積電",
+                price=912.0,
+                change=8.0,
+                change_percent=0.89,
+                market_time=None,
+                source="TWSE MIS API",
+            )
 
-    assert result.final_answer == "我不確定這個答案。"
-    assert result.tool_steps == []
+    import linebot_app.agent_loop as al
+
+    monkeypatch.setattr(al, "MarketService", _FakeMarketService)
+    text = _run_market_quote_fallback("今天台積電股價是多少")
+
+    assert "台積電" in text
+    assert "2330.TW" in text

@@ -31,7 +31,11 @@ class DocumentParserService:
             elif suffix in {".txt", ".md", ".csv", ".tsv"}:
                 text = self._parse_text(content)
             elif suffix in {".doc", ".xls", ".ppt"}:
-                return "", "目前不支援舊版 Office 二進位格式（.doc/.xls/.ppt），請轉成 .docx/.xlsx/.pptx。"
+                return (
+                    "",
+                    "目前不支援舊版 Office 二進位格式（.doc/.xls/.ppt），"
+                    "請轉成 .docx/.xlsx/.pptx。",
+                )
             else:
                 return "", f"目前不支援此檔案格式：{suffix or '未知格式'}"
         except ModuleNotFoundError:

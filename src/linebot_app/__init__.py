@@ -17,7 +17,7 @@ except ImportError:
 
 def main() -> None:
     settings = get_settings()
-    should_run_tray = sys.platform == "win32"
+    should_run_tray = sys.platform == "win32" and settings.tray_ui_enabled
     if should_run_tray:
         try:
             from .tray_app import run_tray_app
