@@ -52,12 +52,86 @@ class AnswerComposerService:
         web_items = (web.items if web else []) if plan.needs_external_info else []
         combined = (knowledge_items + web_items)[: max(0, self.config.max_evidence_items)]
 
+        # Deterministic handling for high-risk realtime factual labels.
+        # Goal: avoid LLM hallucinations and reduce "I can't" when evidence exists.
+        if web and web.sufficient and plan.needs_external_info:
+            if plan.label == "finance_price":
+                for item in web.items:
+                    if (
+                        "mis.twse.com.tw" in (item.source or "")
+                        and "（2330）" in (item.snippet or "")
+                    ):
+                        snippet = (item.snippet or "").strip()
+                        return AnswerDraft(
+                            text=f"{snippet}\n來源：{item.source}",
+                            used_evidence=combined,
+                            confidence="high",
+                        )
+                for item in web.items:
+                    if "mis.twse.com.tw" in (item.source or ""):
+                        snippet = (item.snippet or "").strip()
+                        return AnswerDraft(
+                            text=f"{snippet}\n來源：{item.source}",
+                            used_evidence=combined,
+                            confidence="high",
+                        )
+
+            if plan.label == "weather_disaster":
+                # If we only have link/index pages without weather numbers, ask user for the
+                # specific time window or accept fail-closed.
+                has_signal = any(
+                    ("°" in (it.snippet or "")) or ("℃" in (it.snippet or ""))
+                    for it in web.items
+                )
+                if not has_signal:
+                    has_signal = any(
+                        ("氣溫" in (it.snippet or "") and "度" in (it.snippet or ""))
+                        or ("降雨機率" in (it.snippet or ""))
+                        for it in web.items
+                    )
+                if has_signal:
+                    top = web.items[0]
+                    snippet = " ".join((top.snippet or "").split()).strip()
+                    return AnswerDraft(
+                        text=f"根據目前可取得的天氣資訊整理：{snippet[:240]}\n來源：{top.source}",
+                        used_evidence=combined,
+                        confidence="high",
+                    )
+
+            if plan.label == "traffic_transit":
+                for item in web.items:
+                    if "project-osrm.org/route" in (item.source or ""):
+                        snippet = (item.snippet or "").strip()
+                        return AnswerDraft(
+                            text=f"{snippet}\n來源：{item.source}",
+                            used_evidence=combined,
+                            confidence="high",
+                        )
+
         if plan.forbid_unverified_claims and plan.needs_external_info:
             if not (web and web.sufficient):
+                compact = q.replace(" ", "")
+                if "高鐵" in compact and any(t in compact for t in ("票價", "車票", "fare")):
+                    hint = (
+                        "我有嘗試查詢外部來源，但目前沒有抓到可直接確認票價的官方資料片段。"
+                        "你可以補充「起站/迄站、單程或來回、標準/商務、成人或優惠」；"
+                        "我會再用更聚焦的查詢嘗試整理。"
+                    )
+                elif any(t in compact for t in ("賽程", "比分", "比賽", "cpbl", "mlb", "npb")):
+                    hint = (
+                        "我有嘗試查詢外部來源，但目前沒有抓到可直接確認『今天賽程/比賽』的可靠片段。"
+                        "你可以補充「聯盟（中職/MLB 等）＋隊名＋日期（例如 4/9）」；"
+                        "我會再用更聚焦的查詢整理。"
+                    )
+                else:
+                    hint = (
+                        "你可以告訴我更精確的範圍（例如地區/時間/關鍵名詞），"
+                        "我就能用更聚焦的查詢再整理一次。"
+                    )
                 return AnswerDraft(
                     text=(
                         "這題需要即時外部資料才能安全回答，但我目前查到的來源不足以確認。"
-                        "你可以告訴我更精確的範圍（例如地區/聯盟/時間），我就能用更聚焦的查詢再整理一次。"
+                        + hint
                     ),
                     used_evidence=combined,
                     confidence="low",

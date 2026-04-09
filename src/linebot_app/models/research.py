@@ -4,6 +4,24 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+ResearchLabel = Literal[
+    "unknown",
+    "weather_disaster",
+    "traffic_transit",
+    "finance_price",
+    "store_service_status",
+    "sports_live",
+    "news_public_events",
+    "gov_policy_notice",
+    "entertainment_events",
+    "travel_ticketing",
+    "person_company_product_status",
+    "inventory_local_availability",
+    "health_service_availability",
+    "platform_system_status",
+    "shopping_discount_comparison",
+]
+
 
 class ResearchPlan(BaseModel):
     route: Literal["knowledge_direct", "search_then_answer", "direct_reasoning"] = Field(
@@ -17,6 +35,14 @@ class ResearchPlan(BaseModel):
     )
     freshness: Literal["none", "recent", "today", "realtime"] = Field(
         default="none", description="Freshness requirement for external information."
+    )
+    label: ResearchLabel = Field(
+        default="unknown",
+        description="Domain label for routing / query planning / evidence sufficiency.",
+    )
+    official_source_preferred: bool = Field(
+        default=False,
+        description="Whether official/high-trust sources are preferred/required for this question.",
     )
     search_queries: list[str] = Field(default_factory=list, description="Search queries to run.")
     forbid_unverified_claims: bool = Field(

@@ -113,6 +113,7 @@ class Settings:
     web_search_backend: str = os.getenv("WEB_SEARCH_BACKEND", "bing").strip().lower()
     web_search_enabled: bool = _is_truthy(os.getenv("WEB_SEARCH_ENABLED", "true"))
     web_search_timeout_seconds: int = int(os.getenv("WEB_SEARCH_TIMEOUT_SECONDS", "12"))
+    web_search_debug: bool = _is_truthy(os.getenv("WEB_SEARCH_DEBUG", "false"))
 
     system_prompt: str = os.getenv("SYSTEM_PROMPT", _DEFAULT_SYSTEM_PROMPT)
 

@@ -89,6 +89,8 @@ chat_orchestrator = ChatOrchestrator(
     web_research=web_research,
     composer=composer,
     response_guard=response_guard_service,
+    web_search_enabled=settings.web_search_enabled,
+    web_search_backend=settings.web_search_backend,
 )
 health_service = HealthService(
     llm_service=llm_service,

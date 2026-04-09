@@ -97,6 +97,8 @@ def test_orchestrator_returns_guarded_answer_without_web_sources() -> None:
         web_research=_Web(),  # type: ignore[arg-type]
         composer=composer,
         response_guard=guard,
+        web_search_enabled=True,
+        web_search_backend="bing",
     )
 
     text = orchestrator.handle_user_message(line_user_id="u1", text="什麼是鋼骨結構？")
