@@ -1,17 +1,14 @@
 # LineBot
 
-LineBot 是一個以 FastAPI 為 API 層、LINE Messaging API 為通道層、LM Studio 為本地模型層的助理系統。專案目前採用「策略分流 + API-first 回答 + 防呆守門」的新架構，目標是讓回覆可用、可追蹤、且盡量降低幻覺風險。
+LineBot 是一個以 FastAPI 為 API 層、LINE Messaging API 為通道層、LM Studio 為本地模型層的 **LINE 純文字研究助理**。核心目標是「證據優先」：先查本地知識庫（RAG），必要時再做網路研究（Web Research），最後再由護欄把不可靠斷言擋下來。
 
 ## 核心能力
 
-- 一般問答與多輪對話延續
-- 主題意圖分流（general、weather、market、realtime-sensitive）
-- 天氣與台股查詢的 API-first 回覆
-- 可信來源過濾後的即時資訊整理
-- RAG 本地知識檢索（可開關）
-- LINE 圖片 OCR 與檔案內容解析（PDF/DOCX/XLSX/PPTX/TXT）
-- 回答防護（response guard）與事實查核流程（fact-check）
-- Session memory / profile / tasks 管理與觀測 API
+- LINE 純文字訊息接收與回覆
+- 本地知識庫 / RAG 優先回答（可開關）
+- 需要即時/最新資訊時，自動進入網路研究流程（Web Research）
+- 多輪對話上下文延續（session/message）
+- 回覆安全護欄（Response Guard）：避免無證據的確定句、避免把「查不到」說成「沒有」
 
 ## 架構總覽
 
@@ -28,39 +25,41 @@ LineBot 是一個以 FastAPI 為 API 層、LINE Messaging API 為通道層、LM 
 	- 建立 FastAPI app
 	- 初始化 DB
 	- 組裝 repositories/services
-	- 暴露 webhook 與 admin/health 端點
+	- 暴露 webhook 與最小必要 admin/health 端點
 
 ### 3) LINE 通道層
 
 - `src/linebot_app/bot.py`：
 	- 驗證 LINE webhook signature
-	- 解析 text/image/file 事件
-	- 圖片走 OCR，檔案走 parser，再交由 BotService
+	- 只解析 **文字訊息**（text event）
+	- 處理群組 mention 規則
+	- 交由 `ChatOrchestrator` 執行主流程
 
 ### 4) 對話協調層
 
-- `src/linebot_app/services/bot_service.py`：
-	- 主路由與策略中樞
-	- 依 `answer_policy` 做意圖分流
-	- 整合 session/context、grounded 回答、RAG、fact-check、response guard
-	- 蒐集 policy metrics 供 `/admin/metrics` 觀察
+- `src/linebot_app/services/chat_orchestrator.py`：
+	- 取得 session/context
+	- 呼叫 Planner 產生 `ResearchPlan`
+	- Knowledge-first：先查 RAG，足夠就 grounded 回答
+	- 不足再 Web research：搜尋 + 抓頁面文字摘要
+	- Composer 統整證據生成答案
+	- Guard 最後審視與必要改寫
 
 ### 5) 領域服務層
 
-- `src/linebot_app/services/answer_policy.py`：文字意圖判定
-- `src/linebot_app/services/grounded_reply_service.py`：天氣/市場/查詢型問題的來源導向回答
-- `src/linebot_app/services/weather_service.py`：Open-Meteo 地理編碼與天氣摘要
-- `src/linebot_app/services/market_service.py`：TWSE/Yahoo 報價整合
-- `src/linebot_app/services/web_search_service.py`：Bing RSS 搜尋與來源排序
+- `src/linebot_app/services/research_planner_service.py`：Evidence-first 規劃（輸出 `ResearchPlan` JSON）
+- `src/linebot_app/services/knowledge_first_service.py`：RAG 檢索與 grounded draft
+- `src/linebot_app/services/web_search_service.py`：Bing RSS 搜尋
+- `src/linebot_app/services/web_research_service.py`：多 query 搜尋 + 抓頁面文字摘要（evidence）
+- `src/linebot_app/services/answer_composer_service.py`：整合 evidence 生成回答
 - `src/linebot_app/services/llm_service.py`：LM Studio 對話與 embedding
 - `src/linebot_app/services/rag_service.py`：知識切塊與檢索
 - `src/linebot_app/services/response_guard_service.py`：輸出防護與改寫
-- `src/linebot_app/services/factcheck_service.py`：查證流程
 
 ### 6) 資料層
 
 - `src/linebot_app/db/`：SQLite schema/init
-- `src/linebot_app/repositories/`：session、message、llm_log、knowledge、memory、task 等 repository
+- `src/linebot_app/repositories/`：session、message、llm_log、knowledge repository
 
 ### 7) 政策與設定
 
@@ -71,12 +70,10 @@ LineBot 是一個以 FastAPI 為 API 層、LINE Messaging API 為通道層、LM 
 ## 訊息處理流程
 
 1. LINE webhook 進入 `/webhook`
-2. `bot.py` 解析事件（文字/圖片/檔案）
-3. 視事件型態先做 OCR 或檔案抽文
-4. `BotService` 執行意圖分流
-5. 依題型走 API-first / grounded / RAG / 一般 LLM 回覆
-6. 進入 response guard 與必要後處理
-7. 寫入 session/log/memory/task，回傳 LINE reply
+2. `bot.py` 解析文字事件（含群組 mention 規則）
+3. `ChatOrchestrator`：
+	- planner → knowledge-first → web research（必要時）→ composer → guard
+4. 寫入 session/message/log，回傳 LINE reply
 
 ## 快速開始
 
@@ -141,10 +138,6 @@ Invoke-RestMethod http://127.0.0.1:8000/health/detail
 
 - `SQLITE_PATH`
 - `SESSION_MAX_TURNS`
-- `SESSION_MEMORY_ENABLED`
-- `SESSION_MEMORY_TRIGGER_MESSAGES`
-- `SESSION_MEMORY_WINDOW_MESSAGES`
-- `SESSION_MEMORY_MAX_CHARS`
 
 ### Grounding / Search / RAG
 
@@ -162,12 +155,6 @@ Invoke-RestMethod http://127.0.0.1:8000/health/detail
 - `RESPONSE_GUARD_ENABLED`
 - `RESPONSE_GUARD_REWRITE_ENABLED`
 - `RESPONSE_GUARD_MAX_INPUT_CHARS`
-- `FACTCHECK_ENABLED`
-- `FACTCHECK_MAX_SEARCH_QUERIES`
-- `FACTCHECK_MAX_RESULTS_PER_QUERY`
-- `IMAGE_OCR_ENABLED`
-- `FILE_PARSER_ENABLED`
-- `AGENT_ENABLED`
 
 ## API 一覽
 
@@ -180,17 +167,8 @@ Invoke-RestMethod http://127.0.0.1:8000/health/detail
 
 ### 管理端點
 
-- `POST /admin/reload-prompt`
-- `GET /admin/session/{line_user_id}`
-- `GET /admin/session/{line_user_id}/memory`
-- `GET /admin/session/{line_user_id}/profile`
-- `GET /admin/session/{line_user_id}/tasks`
 - `GET /admin/llm-logs`
-- `GET /admin/metrics`
-- `GET /admin/model`
-- `POST /admin/model`
 - `POST /admin/knowledge/reindex`
-- `GET /admin/knowledge/status`
 
 ## CLI 維運指令
 

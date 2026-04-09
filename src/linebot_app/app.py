@@ -12,40 +12,24 @@ from .repositories import (
     KnowledgeRepository,
     LLMLogRepository,
     MessageRepository,
-    PromptRepository,
-    SessionMemoryRepository,
     SessionRepository,
-    SessionTaskRepository,
 )
 from .services import (
-    BotService,
-    FactCheckConfig,
-    FactCheckService,
+    AnswerComposerService,
+    ChatOrchestrator,
     HealthService,
+    KnowledgeFirstService,
     LLMService,
-    ProfileMemoryService,
-    PromptService,
     RAGService,
+    ResearchPlannerService,
     ResponseGuardService,
     SessionService,
-    SourceScoringService,
-    TaskMemoryService,
+    WebResearchService,
+    WebSearchService,
 )
 
 settings = get_settings()
 init_db(settings.sqlite_path)
-
-
-def _get_default_search_fn():
-    """Return the project's default web-search function."""
-    try:
-        from .services.web_search_service import WebSearchService
-
-        service = WebSearchService.from_settings(settings)
-        return lambda query: service.search(query=query)
-    except Exception:
-        return None
-
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -58,11 +42,8 @@ app = FastAPI(title="LineBot", version="0.1.0", lifespan=lifespan)
 
 session_repository = SessionRepository(settings.sqlite_path)
 message_repository = MessageRepository(settings.sqlite_path)
-prompt_repository = PromptRepository(settings.sqlite_path)
 llm_log_repository = LLMLogRepository(settings.sqlite_path)
 knowledge_repository = KnowledgeRepository(settings.sqlite_path)
-session_memory_repository = SessionMemoryRepository(settings.sqlite_path)
-session_task_repository = SessionTaskRepository(settings.sqlite_path)
 llm_service = LLMService(
     base_url=settings.lm_studio_base_url,
     chat_model=settings.lm_studio_chat_model,
@@ -71,10 +52,6 @@ llm_service = LLMService(
     max_tokens=settings.lm_studio_max_tokens,
     temperature=settings.lm_studio_temperature,
     exe_path=settings.lm_studio_exe_path,
-)
-prompt_service = PromptService(
-    prompt_repository=prompt_repository,
-    default_prompt=settings.system_prompt,
 )
 rags_service = RAGService(
     llm_service=llm_service,
@@ -95,42 +72,24 @@ response_guard_service = ResponseGuardService(
     max_input_chars=settings.response_guard_max_input_chars,
     timeout_seconds=settings.lm_studio_guard_timeout_seconds,
 )
-source_scoring_service = SourceScoringService()
-profile_memory_service = ProfileMemoryService()
-task_memory_service = TaskMemoryService()
-bot_service = BotService(
+planner = ResearchPlannerService(llm_service=llm_service)
+knowledge_first = KnowledgeFirstService(
+    llm_service=llm_service,
+    rag_service=rags_service if settings.rag_enabled else None,
+)
+web_search_service = WebSearchService.from_settings(settings)
+web_research = WebResearchService(web_search_service=web_search_service)
+composer = AnswerComposerService(llm_service=llm_service)
+chat_orchestrator = ChatOrchestrator(
     session_service=session_service,
     message_repository=message_repository,
     llm_log_repository=llm_log_repository,
-    llm_service=llm_service,
-    prompt_service=prompt_service,
-    rag_service=rags_service,
-    rag_enabled=settings.rag_enabled,
-    rag_top_k=settings.rag_top_k,
-    max_context_chars=settings.max_context_chars,
-    session_memory_repository=session_memory_repository,
-    session_memory_enabled=settings.session_memory_enabled,
-    session_memory_trigger_messages=settings.session_memory_trigger_messages,
-    session_memory_window_messages=settings.session_memory_window_messages,
-    session_memory_max_chars=settings.session_memory_max_chars,
-    response_guard_service=response_guard_service,
-    source_scoring_service=source_scoring_service,
-    session_task_repository=session_task_repository,
-    task_memory_service=task_memory_service,
-    factcheck_service=(
-        FactCheckService(
-            llm_service=llm_service,
-            search_fn=_get_default_search_fn(),
-            config=FactCheckConfig(
-                max_search_queries=settings.factcheck_max_search_queries,
-                max_results_per_query=settings.factcheck_max_results_per_query,
-            ),
-        )
-        if settings.factcheck_enabled
-        else None
-    ),
+    planner=planner,
+    knowledge_first=knowledge_first,
+    web_research=web_research,
+    composer=composer,
+    response_guard=response_guard_service,
 )
-bot_service.agent_enabled = settings.agent_enabled
 health_service = HealthService(
     llm_service=llm_service,
     llm_log_repository=llm_log_repository,
@@ -158,95 +117,10 @@ def health_detail() -> dict[str, object]:
     return health_service.detail()
 
 
-@app.post("/admin/reload-prompt")
-def reload_prompt(payload: dict[str, str] | None = None) -> dict[str, object]:
-    prompt = (payload or {}).get("prompt")
-    return {"ok": True, "active_prompt": prompt_service.reload(prompt)}
-
-
-@app.get("/admin/session/{line_user_id}")
-def admin_session(line_user_id: str) -> dict[str, object]:
-    session = session_repository.get_by_line_user_id(line_user_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    messages = message_repository.get_recent_messages(
-        session_id=session.id,
-        limit=settings.session_max_turns * 2,
-    )
-    return {
-        "session": asdict(session),
-        "messages": [asdict(message) for message in messages],
-    }
-
-
-@app.get("/admin/session/{line_user_id}/memory")
-def admin_session_memory(line_user_id: str) -> dict[str, object]:
-    session = session_repository.get_by_line_user_id(line_user_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    memory = session_memory_repository.get(session.id)
-    if memory is None:
-        return {
-            "ok": True,
-            "session_id": session.id,
-            "summary": "",
-            "last_message_id": 0,
-        }
-
-    return {
-        "ok": True,
-        "session_id": memory.session_id,
-        "summary": memory.summary,
-        "last_message_id": memory.last_message_id,
-    }
-
-
-@app.get("/admin/session/{line_user_id}/profile")
-def admin_session_profile(line_user_id: str) -> dict[str, object]:
-    session = session_repository.get_by_line_user_id(line_user_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    memory = session_memory_repository.get(session.id)
-    summary = memory.summary if memory is not None else ""
-    profile = profile_memory_service.extract(summary)
-    return {
-        "ok": True,
-        "session_id": session.id,
-        "profile": profile,
-    }
-
-
-@app.get("/admin/session/{line_user_id}/tasks")
-def admin_session_tasks(line_user_id: str, status: str = "open") -> dict[str, object]:
-    session = session_repository.get_by_line_user_id(line_user_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    tasks = session_task_repository.get_by_session(session_id=session.id, status=status or None)
-    return {
-        "ok": True,
-        "session_id": session.id,
-        "count": len(tasks),
-        "items": [asdict(item) for item in tasks],
-    }
-
-
 @app.post("/admin/knowledge/reindex")
 def admin_knowledge_reindex() -> dict[str, object]:
     result = rags_service.reindex_knowledge()
     return {"ok": True, **result}
-
-
-@app.get("/admin/knowledge/status")
-def admin_knowledge_status() -> dict[str, object]:
-    return {
-        "ok": True,
-        "rag_enabled": settings.rag_enabled,
-        "knowledge_dir": settings.knowledge_dir,
-        **rags_service.status(),
-    }
 
 
 @app.get("/admin/llm-logs")
@@ -257,37 +131,6 @@ def admin_llm_logs(limit: int = 20) -> dict[str, object]:
         "ok": True,
         "count": len(logs),
         "items": logs,
-    }
-
-
-@app.get("/admin/metrics")
-def admin_metrics(limit: int = 200) -> dict[str, object]:
-    safe_limit = min(max(limit, 10), 1000)
-    return {
-        "ok": True,
-        **health_service.metrics(limit=safe_limit),
-        "policy": bot_service.get_policy_metrics(),
-    }
-
-
-@app.get("/admin/model")
-def admin_model_get() -> dict[str, object]:
-    return {
-        "ok": True,
-        **llm_service.get_models(),
-    }
-
-
-@app.post("/admin/model")
-def admin_model_set(payload: dict[str, str] | None = None) -> dict[str, object]:
-    data = payload or {}
-    updated = llm_service.set_models(
-        chat_model=data.get("chat_model"),
-        embed_model=data.get("embed_model"),
-    )
-    return {
-        "ok": True,
-        **updated,
     }
 
 
@@ -309,8 +152,7 @@ async def webhook(
         handle_webhook(
             body=body,
             signature=x_line_signature,
-            bot_service=bot_service,
-            schedule_background_task=background_tasks.add_task,
+            chat_orchestrator=chat_orchestrator,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

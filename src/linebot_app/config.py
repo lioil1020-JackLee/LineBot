@@ -46,10 +46,6 @@ _DEPRECATED_ENV_KEYS = (
     "ROLEPLAY_PERSONA_PROMPT",
     "ROLEPLAY_PRIORITY_MODE",
     "CODING_ASSISTANCE_ENABLED",
-    "RESPONSE_STYLE",
-    "AGENT_FAST_MODE",
-    "AGENT_AUTO_SEARCH",
-    "AGENT_MAX_TOOL_ROUNDS",
     "EXTERNAL_LLM_FALLBACK_ENABLED",
     "EXTERNAL_LLM_BASE_URL",
     "EXTERNAL_LLM_API_KEY",
@@ -96,12 +92,6 @@ class Settings:
 
     sqlite_path: str = os.getenv("SQLITE_PATH", "data/app.db")
     session_max_turns: int = int(os.getenv("SESSION_MAX_TURNS", "8"))
-    session_memory_enabled: bool = _is_truthy(os.getenv("SESSION_MEMORY_ENABLED", "true"))
-    session_memory_trigger_messages: int = int(
-        os.getenv("SESSION_MEMORY_TRIGGER_MESSAGES", "6")
-    )
-    session_memory_window_messages: int = int(os.getenv("SESSION_MEMORY_WINDOW_MESSAGES", "12"))
-    session_memory_max_chars: int = int(os.getenv("SESSION_MEMORY_MAX_CHARS", "1200"))
 
     response_guard_enabled: bool = _is_truthy(os.getenv("RESPONSE_GUARD_ENABLED", "true"))
     response_guard_rewrite_enabled: bool = _is_truthy(
@@ -120,19 +110,9 @@ class Settings:
     rag_chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "500"))
     rag_chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "100"))
 
-    agent_enabled: bool = _is_truthy(os.getenv("AGENT_ENABLED", "true"))
-
     web_search_backend: str = os.getenv("WEB_SEARCH_BACKEND", "bing").strip().lower()
     web_search_enabled: bool = _is_truthy(os.getenv("WEB_SEARCH_ENABLED", "true"))
     web_search_timeout_seconds: int = int(os.getenv("WEB_SEARCH_TIMEOUT_SECONDS", "12"))
-
-    image_ocr_enabled: bool = _is_truthy(os.getenv("IMAGE_OCR_ENABLED", "true"))
-    file_parser_enabled: bool = _is_truthy(os.getenv("FILE_PARSER_ENABLED", "true"))
-    factcheck_enabled: bool = _is_truthy(os.getenv("FACTCHECK_ENABLED", "true"))
-    factcheck_max_search_queries: int = int(os.getenv("FACTCHECK_MAX_SEARCH_QUERIES", "2"))
-    factcheck_max_results_per_query: int = int(
-        os.getenv("FACTCHECK_MAX_RESULTS_PER_QUERY", "4")
-    )
 
     system_prompt: str = os.getenv("SYSTEM_PROMPT", _DEFAULT_SYSTEM_PROMPT)
 
